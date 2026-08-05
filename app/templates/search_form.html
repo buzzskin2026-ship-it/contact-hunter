@@ -2,7 +2,7 @@
 {% block title %}Nuova ricerca · Contact Hunter{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><span class="eyebrow">NUOVA RICERCA</span><h1>Definisci i contatti da trovare</h1><p>Una ricerca può partire dall'indice web, da URL forniti da te o da entrambi.</p></div>
+  <div><span class="eyebrow">NUOVA RICERCA</span><h1>Definisci i contatti da trovare</h1><p>La modalità predefinita raccoglie contatti professionali pubblici da siti ufficiali e fonti strutturate pubbliche.</p></div>
 </section>
 <form class="panel search-form" action="/searches" method="post">
   <div class="form-grid">
@@ -10,22 +10,22 @@
     <label><span>Paesi</span><input name="countries" placeholder="Italia, Francia, Germania"></label>
     <label><span>Città o regioni</span><input name="cities" placeholder="Roma, Lazio, Milano"></label>
     <label class="wide"><span>Parole chiave / specializzazioni</span><input name="keywords" placeholder="implantologia, ortodonzia, laboratorio CAD/CAM"></label>
-    <label class="wide"><span>URL iniziali, uno per riga</span><textarea name="seed_urls" rows="6" placeholder="https://esempio.it/contatti&#10;https://altra-clinica.eu"></textarea><small>Utili anche senza chiave API di ricerca.</small></label>
-    <label><span>Numero massimo di contatti</span><input type="number" name="max_results" value="100" min="1" max="10000"></label>
+    <label class="wide"><span>URL iniziali, uno per riga</span><textarea name="seed_urls" rows="6" placeholder="https://esempio.it/contatti&#10;https://altra-clinica.eu"></textarea><small>Facoltativi: il sistema usa anche indice web e fonti strutturate pubbliche.</small></label>
+    <label><span>Numero massimo di contatti</span><input type="number" name="max_results" value="500" min="1" max="10000"></label>
     <fieldset>
       <legend>Dati richiesti</legend>
       <label class="check"><input type="checkbox" name="requested_fields" value="email" checked> Email</label>
       <label class="check"><input type="checkbox" name="requested_fields" value="phone" checked> Telefono</label>
-      <label class="check"><input type="checkbox" name="requested_fields" value="whatsapp"> WhatsApp</label>
-      <label class="check"><input type="checkbox" name="requested_fields" value="address"> Indirizzo</label>
+      <label class="check"><input type="checkbox" name="requested_fields" value="whatsapp" checked> WhatsApp</label>
+      <label class="check"><input type="checkbox" name="requested_fields" value="address" checked> Indirizzo</label>
     </fieldset>
     <fieldset class="wide">
       <legend>Qualità e fonti</legend>
-      <label class="check"><input type="checkbox" name="official_sources_only" value="true" checked> Mantieni solo fonti ufficiali</label>
+      <label class="check"><input type="checkbox" name="official_sources_only" value="true"> Solo siti ufficiali <small>(qualità più alta, quantità molto più bassa)</small></label>
       <label class="check"><input type="checkbox" name="exclude_free_email_providers" value="true"> Escludi Gmail, Outlook e provider gratuiti</label>
     </fieldset>
   </div>
-  <div class="notice"><strong>Modalità corretta:</strong> il crawler rispetta robots.txt, limita la frequenza per dominio e non tenta di superare login o sistemi anti-bot.</div>
-  <div class="form-actions"><a class="button ghost" href="/">Annulla</a><button class="button primary" type="submit">Avvia ricerca</button></div>
+  <div class="notice"><strong>Raccolta ampia lecita:</strong> il sistema usa pagine e fonti pubblicamente accessibili, conserva la fonte, deduplica i contatti e non supera login, CAPTCHA o sistemi di sicurezza.</div>
+  <div class="form-actions"><a class="button ghost" href="/">Annulla</a><button class="button primary" type="submit">Avvia raccolta</button></div>
 </form>
 {% endblock %}

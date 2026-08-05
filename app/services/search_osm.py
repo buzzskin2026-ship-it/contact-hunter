@@ -146,10 +146,10 @@ def _address(tags: dict[str, str]) -> str | None:
 
 
 class OpenStreetMapDentalProvider:
-    """Discover dental practices and dental laboratories with public contact fields.
+    """Discover named dental practices and dental laboratories.
 
-    OpenStreetMap is used only as a discovery source. Official websites discovered here
-    are subsequently crawled by Contact Hunter and remain the preferred final source.
+    Records are discovery hints. Contact Hunter labels OSM-derived contacts separately
+    from contacts verified on an official website.
     """
 
     endpoints = (
@@ -158,7 +158,7 @@ class OpenStreetMapDentalProvider:
     )
 
     def __init__(self, settings: Settings) -> None:
-        self.timeout = max(settings.crawler_timeout_seconds, 35)
+        self.timeout = max(settings.crawler_timeout_seconds, 45)
         self.user_agent = settings.crawler_user_agent
 
     def configured_for(self, sector: str, countries: list[str]) -> bool:
@@ -166,26 +166,27 @@ class OpenStreetMapDentalProvider:
 
     @staticmethod
     def _query(code: str, limit: int) -> str:
-        contact_keys = "^(website|contact:website|url|email|contact:email|phone|contact:phone)$"
-        return f'''[out:json][timeout:35];
+        # Do not require an existing website/email tag: named records without contacts
+        # are useful because the exact business name can be resolved through a web index.
+        return f'''[out:json][timeout:45];
 area["ISO3166-1"="{code}"]->.searchArea;
 (
-  nwr["amenity"="dentist"][~"{contact_keys}"~"."](area.searchArea);
-  nwr["healthcare"="dentist"][~"{contact_keys}"~"."](area.searchArea);
-  nwr["craft"="dental_technician"][~"{contact_keys}"~"."](area.searchArea);
+  nwr["amenity"="dentist"]["name"](area.searchArea);
+  nwr["healthcare"="dentist"]["name"](area.searchArea);
+  nwr["craft"="dental_technician"]["name"](area.searchArea);
 );
 out tags center {limit};'''
 
     async def search_country(
         self,
         country: str,
-        limit: int = 120,
+        limit: int = 180,
     ) -> tuple[list[OsmContactRecord], str]:
         code = country_code(country)
         if not code:
             return [], f"OSM {country}: paese non riconosciuto"
 
-        query = self._query(code, min(max(limit, 20), 200))
+        query = self._query(code, min(max(limit, 30), 300))
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
@@ -211,11 +212,11 @@ out tags center {limit};'''
             return [], f"OSM {country}: {error_name}"
 
         records: list[OsmContactRecord] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str]] = set()
         for element in payload.get("elements", []):
             tags = element.get("tags") or {}
             website = _website(tags)
-            emails = []
+            emails: list[str] = []
             for raw in _split_values(tags.get("contact:email") or tags.get("email")):
                 email = normalize_email(raw)
                 if email and email not in emails:
@@ -225,8 +226,6 @@ out tags center {limit};'''
                     _split_values(tags.get("contact:phone") or tags.get("phone"))
                 )
             )
-            if not website and not emails and not phones:
-                continue
 
             element_type = str(element.get("type", "node"))
             element_id = str(element.get("id", ""))
@@ -243,7 +242,12 @@ out tags center {limit};'''
                 else "Studio dentistico / clinica dentale"
             )
             city = tags.get("addr:city") or tags.get("addr:place") or tags.get("is_in:city")
-            key = (website or "", organization.casefold())
+            address = _address(tags)
+            key = (
+                organization.casefold(),
+                (city or "").casefold(),
+                website or "",
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -254,7 +258,7 @@ out tags center {limit};'''
                     category=category,
                     country=country,
                     city=city,
-                    address=_address(tags),
+                    address=address,
                     website=website,
                     emails=emails,
                     phones=phones,
@@ -262,4 +266,8 @@ out tags center {limit};'''
             )
 
         await asyncio.sleep(0.4)
-        return records, f"OSM {country}: {len(records)} strutture con contatti"
+        with_contacts = sum(bool(record.website or record.emails or record.phones) for record in records)
+        return records, (
+            f"OSM {country}: {len(records)} strutture nominate, "
+            f"{with_contacts} con sito/email/telefono"
+        )

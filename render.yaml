@@ -26,15 +26,23 @@ services:
       - key: BRAVE_SEARCH_API_KEY
         sync: false
       - key: SEARCH_RESULT_LIMIT
-        value: "120"
+        value: "160"
       - key: PUBLIC_SEARCH_FALLBACK_ENABLED
         value: "true"
       - key: PUBLIC_SEARCH_MAX_QUERIES
-        value: "40"
+        value: "60"
       - key: PUBLIC_SEARCH_DELAY_SECONDS
         value: "0.8"
+      - key: COMMON_CRAWL_ENABLED
+        value: "true"
+      - key: COMMON_CRAWL_MAX_DOMAINS
+        value: "80"
+      - key: COMMON_CRAWL_URLS_PER_DOMAIN
+        value: "8"
+      - key: COMMON_CRAWL_DELAY_SECONDS
+        value: "0.15"
       - key: CRAWLER_USER_AGENT
-        value: "ContactHunter/0.4 (+https://contact-hunter.onrender.com)"
+        value: "ContactHunter/0.5 (+https://contact-hunter.onrender.com)"
       - key: CRAWLER_DELAY_SECONDS
         value: "1.0"
       - key: CRAWLER_TIMEOUT_SECONDS
@@ -42,9 +50,17 @@ services:
       - key: CRAWLER_MAX_PAGES_PER_DOMAIN
         value: "12"
       - key: CRAWLER_MAX_RESPONSE_BYTES
-        value: "2000000"
+        value: "8000000"
       - key: CRAWLER_CONCURRENCY
         value: "2"
+      - key: SITEMAP_ENABLED
+        value: "true"
+      - key: SITEMAP_MAX_URLS_PER_DOMAIN
+        value: "18"
+      - key: PDF_ENABLED
+        value: "true"
+      - key: PDF_MAX_PAGES
+        value: "40"
       - key: RESPECT_ROBOTS_TXT
         value: "true"
       - key: PLAYWRIGHT_ENABLED

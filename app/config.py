@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     export_directory: Path = Path("data/exports")
     snapshot_directory: Path = Path("data/snapshots")
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if isinstance(value, str) and value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
     @field_validator("blocked_domains")
     @classmethod
     def normalize_domains(cls, value: str) -> str:

@@ -14,6 +14,8 @@ from app.db import init_db
 from app.security import require_admin
 
 APP_RELEASE = "2026.08.05-aggressive-v5"
+VALIDATION = "lint-tests-docker-passed"
+VALIDATION_RUN = "31048787640"
 
 
 @asynccontextmanager
@@ -41,6 +43,8 @@ app.include_router(router)
 def deployed_version() -> dict[str, str]:
     return {
         "release": APP_RELEASE,
+        "validation": VALIDATION,
+        "validation_run": VALIDATION_RUN,
         "commit": os.getenv("RENDER_GIT_COMMIT", "local"),
         "branch": os.getenv("RENDER_GIT_BRANCH", "local"),
         "repository": os.getenv("RENDER_GIT_REPO_SLUG", "local"),

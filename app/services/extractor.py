@@ -4,11 +4,10 @@ import html as html_lib
 import json
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 
 try:
     import phonenumbers
-except ImportError:  # Optional fallback for minimal installations.
+except ImportError:
     phonenumbers = None
 
 from bs4 import BeautifulSoup
@@ -22,14 +21,19 @@ CONTACT_PATH_HINTS = (
 )
 
 COUNTRY_REGIONS = {
-    "italy": "IT", "france": "FR", "germany": "DE", "spain": "ES", "portugal": "PT",
-    "belgium": "BE", "netherlands": "NL", "austria": "AT", "switzerland": "CH",
-    "ireland": "IE", "united kingdom": "GB", "poland": "PL", "greece": "GR",
-    "denmark": "DK", "sweden": "SE", "norway": "NO", "finland": "FI",
-    "romania": "RO", "czechia": "CZ", "slovakia": "SK", "croatia": "HR",
+    "italy": "IT", "italia": "IT", "france": "FR", "francia": "FR",
+    "germany": "DE", "germania": "DE", "spain": "ES", "spagna": "ES",
+    "portugal": "PT", "portogallo": "PT", "belgium": "BE", "belgio": "BE",
+    "netherlands": "NL", "paesi bassi": "NL", "olanda": "NL", "austria": "AT",
+    "switzerland": "CH", "svizzera": "CH", "ireland": "IE", "irlanda": "IE",
+    "united kingdom": "GB", "poland": "PL", "polonia": "PL", "greece": "GR",
+    "grecia": "GR", "denmark": "DK", "sweden": "SE", "norway": "NO",
+    "finland": "FI", "romania": "RO", "czechia": "CZ", "slovakia": "SK",
+    "croatia": "HR",
 }
 
 GENERIC_TITLES = {"home", "homepage", "contact", "contacts", "welcome", "index"}
+EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}", flags=re.I)
 
 
 @dataclass
@@ -60,6 +64,25 @@ def _clean_text(value: str | None) -> str | None:
         return None
     cleaned = " ".join(html_lib.unescape(value).split())
     return cleaned[:500] if cleaned else None
+
+
+def _deobfuscate(value: str) -> str:
+    value = html_lib.unescape(value)
+    value = re.sub(r"\s*(?:\[at\]|\(at\)|\{at\}| at )\s*", "@", value, flags=re.I)
+    value = re.sub(r"\s*(?:\[dot\]|\(dot\)|\{dot\}| dot )\s*", ".", value, flags=re.I)
+    return value
+
+
+def _decode_cfemail(value: str) -> str | None:
+    try:
+        data = bytes.fromhex(value)
+        if len(data) < 2:
+            return None
+        key = data[0]
+        decoded = "".join(chr(byte ^ key) for byte in data[1:])
+        return decoded
+    except (ValueError, UnicodeError):
+        return None
 
 
 def _organization_name(soup: BeautifulSoup, json_objects: list[dict]) -> str | None:
@@ -101,10 +124,8 @@ def _extract_address(json_objects: list[dict]) -> tuple[str | None, str | None]:
 
 
 def extract_page(html: str, url: str, country: str | None = None, keywords: list[str] | None = None) -> ExtractedPage:
+    raw_source = _deobfuscate(html)
     soup = BeautifulSoup(html, "lxml")
-    for tag in soup(["script", "style", "noscript", "template", "svg"]):
-        if tag.name != "script" or tag.get("type") != "application/ld+json":
-            tag.decompose()
 
     json_objects: list[dict] = []
     for script in soup.select('script[type="application/ld+json"]'):
@@ -114,24 +135,42 @@ def extract_page(html: str, url: str, country: str | None = None, keywords: list
         except (json.JSONDecodeError, TypeError):
             continue
 
-    visible_text = " ".join(soup.get_text(" ", strip=True).split())
-    deobfuscated = re.sub(r"\s*(?:\[at\]|\(at\)| at )\s*", "@", visible_text, flags=re.I)
-    deobfuscated = re.sub(r"\s*(?:\[dot\]|\(dot\)| dot )\s*", ".", deobfuscated, flags=re.I)
-
-    raw_emails: set[str] = set()
+    raw_emails: set[str] = set(EMAIL_PATTERN.findall(raw_source))
     for link in soup.select('a[href^="mailto:"]'):
         raw_emails.add(str(link.get("href", ""))[7:].split("?", 1)[0])
-    raw_emails.update(re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}", deobfuscated, flags=re.I))
+    for element in soup.select("[data-cfemail]"):
+        decoded = _decode_cfemail(str(element.get("data-cfemail", "")))
+        if decoded:
+            raw_emails.add(decoded)
+    for element in soup.select("[data-email], [data-mail]"):
+        value = element.get("data-email") or element.get("data-mail")
+        if value:
+            raw_emails.update(EMAIL_PATTERN.findall(_deobfuscate(str(value))))
+    for element in soup.select("[data-user][data-domain]"):
+        raw_emails.add(f"{element.get('data-user')}@{element.get('data-domain')}")
     for obj in json_objects:
         email = obj.get("email")
         if isinstance(email, str):
             raw_emails.add(email.replace("mailto:", ""))
+
+    for tag in soup(["script", "style", "noscript", "template", "svg"]):
+        if tag.name != "script" or tag.get("type") != "application/ld+json":
+            tag.decompose()
+
+    visible_text = " ".join(soup.get_text(" ", strip=True).split())
+    raw_emails.update(EMAIL_PATTERN.findall(_deobfuscate(visible_text)))
     emails = sorted({email for value in raw_emails if (email := normalize_email(value))})
 
     region = COUNTRY_REGIONS.get((country or "").lower())
     phones: set[str] = set()
     whatsapp: set[str] = set()
     tel_values = [str(link.get("href", ""))[4:].split("?", 1)[0] for link in soup.select('a[href^="tel:"]')]
+    for obj in json_objects:
+        telephone = obj.get("telephone")
+        if isinstance(telephone, str):
+            tel_values.append(telephone)
+        elif isinstance(telephone, list):
+            tel_values.extend(str(value) for value in telephone if value)
     if phonenumbers is not None:
         for value in tel_values:
             try:

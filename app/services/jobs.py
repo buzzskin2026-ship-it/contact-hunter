@@ -14,6 +14,7 @@ from app.services.crawler import ContactCrawler
 from app.services.extractor import reliability_for
 from app.services.normalizer import canonical_url, contact_fingerprint, is_free_email
 from app.services.search import BraveSearchProvider, PublicSearchProvider, build_queries
+from app.services.search_bing import BingRssSearchProvider
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-job")
 
@@ -26,15 +27,18 @@ def _run_job_sync(job_id: str) -> None:
     asyncio.run(_run_job(job_id))
 
 
-async def _discover(job: SearchJob) -> list[str]:
+async def _discover(job: SearchJob) -> tuple[list[str], list[str]]:
     settings = get_settings()
     urls: list[str] = []
+    diagnostics: list[str] = []
+
     for raw in job.seed_urls or []:
         normalized = canonical_url(str(raw))
         if normalized:
             urls.append(normalized)
 
     brave = BraveSearchProvider(settings)
+    bing = BingRssSearchProvider(settings)
     public = PublicSearchProvider(settings)
     queries = build_queries(job.sector, job.countries or [], job.cities or [], job.keywords or [])
     query_limit = len(queries) if brave.configured else settings.public_search_max_queries
@@ -43,16 +47,28 @@ async def _discover(job: SearchJob) -> list[str]:
 
     for query in selected_queries:
         hits = []
+
         if brave.configured:
             try:
                 hits = await brave.search(query, count=per_query)
-            except Exception:
-                hits = []
+                diagnostics.append(f"Brave={len(hits)}")
+            except Exception as exc:
+                diagnostics.append(f"Brave={type(exc).__name__}")
+
+        if not hits and bing.configured:
+            try:
+                hits = await bing.search(query, count=min(per_query, 12))
+                diagnostics.append(f"BingRSS={len(hits)}")
+            except Exception as exc:
+                diagnostics.append(f"BingRSS={type(exc).__name__}")
+
         if not hits and public.configured:
             try:
                 hits = await public.search(query, count=min(per_query, 12))
-            except Exception:
-                hits = []
+                diagnostics.append(f"DuckDuckGo={len(hits)}")
+            except Exception as exc:
+                diagnostics.append(f"DuckDuckGo={type(exc).__name__}")
+
         urls.extend(hit.url for hit in hits)
 
     unique: list[str] = []
@@ -65,7 +81,7 @@ async def _discover(job: SearchJob) -> list[str]:
         unique.append(url)
         if len(unique) >= job.max_results * 3:
             break
-    return unique
+    return unique, diagnostics
 
 
 async def _run_job(job_id: str) -> None:
@@ -81,13 +97,15 @@ async def _run_job(job_id: str) -> None:
         job.error_message = None
         db.commit()
 
-        urls = await _discover(job)
+        urls, diagnostics = await _discover(job)
         job.discovered_urls = len(urls)
         db.commit()
         if not urls:
+            details = "; ".join(diagnostics[-8:]) or "nessun provider eseguito"
             raise RuntimeError(
-                "Nessun sito trovato. Il motore pubblico può essere temporaneamente limitato: "
-                "riprova, configura BRAVE_SEARCH_API_KEY oppure inserisci alcuni URL iniziali."
+                "Nessun sito trovato dai motori disponibili. "
+                f"Diagnostica: {details}. "
+                "Per risultati affidabili configura BRAVE_SEARCH_API_KEY oppure inserisci URL iniziali."
             )
 
         country_hint = job.countries[0] if len(job.countries or []) == 1 else None
@@ -136,11 +154,17 @@ async def _run_job(job_id: str) -> None:
             if not selected_emails and not selected_phones and not selected_whatsapp:
                 db.commit()
                 continue
-            if job.exclude_free_email_providers and selected_emails and all(is_free_email(e) for e in selected_emails):
+            if job.exclude_free_email_providers and selected_emails and all(
+                is_free_email(email) for email in selected_emails
+            ):
                 db.commit()
                 continue
 
-            fingerprint = contact_fingerprint(candidate.domain, selected_emails, selected_phones or selected_whatsapp)
+            fingerprint = contact_fingerprint(
+                candidate.domain,
+                selected_emails,
+                selected_phones or selected_whatsapp,
+            )
             organization = candidate.organization or candidate.domain.split(".")[0].replace("-", " ").title()
             contact = Contact(
                 job_id=job.id,
@@ -159,7 +183,10 @@ async def _run_job(job_id: str) -> None:
                 source_type="official_website",
                 reliability=reliability_for(selected_emails, candidate.website),
                 status="verified_public",
-                notes="Contatto estratto da una pagina pubblica. Verificare finalità e base giuridica prima dell'uso commerciale.",
+                notes=(
+                    "Contatto estratto da una pagina pubblica. Verificare finalità e base giuridica "
+                    "prima dell'uso commerciale."
+                ),
                 fingerprint=fingerprint,
             )
             db.add(contact)

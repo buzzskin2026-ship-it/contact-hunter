@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/contact_hunter.db"
     brave_search_api_key: str | None = None
     search_result_limit: int = Field(default=40, ge=1, le=200)
+    public_search_fallback_enabled: bool = True
+    public_search_max_queries: int = Field(default=12, ge=1, le=30)
+    public_search_delay_seconds: float = Field(default=1.0, ge=0.0, le=10.0)
 
     crawler_user_agent: str = "ContactHunter/0.1 (+https://example.com/bot)"
     crawler_contact_email: str | None = None

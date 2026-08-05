@@ -13,8 +13,8 @@
 </section>
 {% if job.error_message %}<div class="alert error">{{ job.error_message }}</div>{% endif %}
 <div class="toolbar">
-  {% if job.status == 'failed' %}
-  <form action="/searches/{{ job.id }}/retry" method="post"><button class="button primary" type="submit">Riprova ricerca</button></form>
+  {% if job.status in ['failed', 'completed'] %}
+  <form action="/searches/{{ job.id }}/retry" method="post"><button class="button primary" type="submit">Ripeti ricerca</button></form>
   {% endif %}
   <a class="button secondary" href="/exports/xlsx?job_id={{ job.id }}">Esporta Excel</a>
   <a class="button ghost" href="/exports/csv?job_id={{ job.id }}">Esporta CSV</a>

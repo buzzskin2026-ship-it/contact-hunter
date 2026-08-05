@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -74,11 +75,7 @@ def _public_result_target(raw_href: str) -> str | None:
 
 
 class PublicSearchProvider:
-    """Low-volume public fallback used when no commercial search API is configured.
-
-    It intentionally limits requests and results. Public HTML search can occasionally
-    be throttled; in that case the job continues with any seed URLs or partial hits.
-    """
+    """Low-volume public fallback used when no commercial search API is configured."""
 
     endpoint = "https://html.duckduckgo.com/html/"
 
@@ -136,17 +133,59 @@ class PublicSearchProvider:
         return hits
 
 
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
+
+
+LOCAL_DENTAL_TERMS = {
+    "italia": "studio dentistico clinica dentale laboratorio odontotecnico",
+    "italy": "studio dentistico clinica dentale laboratorio odontotecnico",
+    "francia": "cabinet dentaire clinique dentaire laboratoire dentaire",
+    "france": "cabinet dentaire clinique dentaire laboratoire dentaire",
+    "germania": "Zahnarztpraxis Zahnklinik Dentallabor",
+    "germany": "Zahnarztpraxis Zahnklinik Dentallabor",
+    "austria": "Zahnarztpraxis Zahnklinik Dentallabor",
+    "spagna": "clinica dental dentista laboratorio dental",
+    "spain": "clinica dental dentista laboratorio dental",
+    "olanda": "tandartspraktijk tandheelkundige kliniek tandtechnisch laboratorium",
+    "paesi bassi": "tandartspraktijk tandheelkundige kliniek tandtechnisch laboratorium",
+    "netherlands": "tandartspraktijk tandheelkundige kliniek tandtechnisch laboratorium",
+    "polonia": "klinika stomatologiczna gabinet dentystyczny laboratorium protetyczne",
+    "poland": "klinika stomatologiczna gabinet dentystyczny laboratorium protetyczne",
+    "grecia": "οδοντιατρειο οδοντιατρικη κλινικη οδοντοτεχνικο εργαστηριο",
+    "greece": "οδοντιατρειο οδοντιατρικη κλινικη οδοντοτεχνικο εργαστηριο",
+    "portogallo": "clinica dentaria dentista laboratorio de protese dentaria",
+    "portugal": "clinica dentaria dentista laboratorio de protese dentaria",
+    "svizzera": "Zahnarztpraxis cabinet dentaire studio dentistico Dentallabor",
+    "switzerland": "Zahnarztpraxis cabinet dentaire studio dentistico Dentallabor",
+}
+
+
+def _is_dental(sector: str) -> bool:
+    folded = _fold(sector)
+    return any(token in folded for token in ("dent", "odont", "zahnarzt", "stomatolog"))
+
+
 def build_queries(sector: str, countries: list[str], cities: list[str], keywords: list[str]) -> list[str]:
     locations = cities or countries or [""]
     extra = " ".join(keywords[:5])
-    queries: list[str] = []
+    dental = _is_dental(sector)
+
+    bases: list[str] = []
     for location in locations:
-        base = " ".join(part for part in (sector, location, extra) if part).strip()
-        queries.extend(
-            [
-                f'{base} contatti email sito ufficiale',
-                f'{base} contact email official website',
-                f'{base} telefono email',
-            ]
-        )
+        local_sector = LOCAL_DENTAL_TERMS.get(_fold(location), sector) if dental else sector
+        bases.append(" ".join(part for part in (local_sector, location, extra) if part).strip())
+
+    # Round-robin by query type: with a low public-query limit, every country gets
+    # at least one discovery query instead of spending the quota on the first countries.
+    suffixes = (
+        "contact email official website",
+        "contatti email sito ufficiale",
+        "telefono email",
+    )
+    queries: list[str] = []
+    for suffix in suffixes:
+        for base in bases:
+            queries.append(f"{base} {suffix}".strip())
     return list(dict.fromkeys(queries))

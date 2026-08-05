@@ -5,6 +5,9 @@
   <div><span class="eyebrow">RICERCA {{ job.id[:8] }}</span><h1>{{ job.sector }}</h1><p>{{ (job.cities or job.countries)|join(', ') or 'Siti forniti manualmente' }}</p></div>
   <span id="job-status" class="status large {{ job.status }}">{{ job.status }}</span>
 </section>
+{% if not job.official_sources_only %}
+<div class="notice"><strong>Modalità raccolta ampia:</strong> include contatti professionali pubblici da siti ufficiali e fonti strutturate pubbliche, sempre con fonte e livello di affidabilità.</div>
+{% endif %}
 <section class="metrics compact">
   <article><span>URL scoperti</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
   <article><span>Pagine analizzate</span><strong id="crawled-pages">{{ job.crawled_pages }}</strong></article>
@@ -14,7 +17,10 @@
 {% if job.error_message %}<div class="alert error">{{ job.error_message }}</div>{% endif %}
 <div class="toolbar">
   {% if job.status in ['failed', 'completed'] %}
-  <form action="/searches/{{ job.id }}/retry" method="post"><button class="button primary" type="submit">Ripeti ricerca</button></form>
+  <form action="/searches/{{ job.id }}/retry" method="post"><button class="button secondary" type="submit">Ripeti stessa modalità</button></form>
+  {% endif %}
+  {% if job.status in ['failed', 'completed'] and job.official_sources_only %}
+  <form action="/searches/{{ job.id }}/broad-retry" method="post"><button class="button primary" type="submit">Raccolta ampia · fino a 500</button></form>
   {% endif %}
   <a class="button secondary" href="/exports/xlsx?job_id={{ job.id }}">Esporta Excel</a>
   <a class="button ghost" href="/exports/csv?job_id={{ job.id }}">Esporta CSV</a>

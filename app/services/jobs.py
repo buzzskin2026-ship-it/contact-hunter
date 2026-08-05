@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import unicodedata
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -18,11 +21,52 @@ from app.services.normalizer import (
     domain_of,
     is_free_email,
 )
-from app.services.search import BraveSearchProvider, PublicSearchProvider, build_queries
+from app.services.search import BraveSearchProvider, PublicSearchProvider, SearchHit, build_queries
 from app.services.search_bing import BingRssSearchProvider
 from app.services.search_osm import OpenStreetMapDentalProvider, OsmContactRecord
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-job")
+
+_DISCOVERY_BLOCKLIST = {
+    "bing.com",
+    "duckduckgo.com",
+    "google.com",
+    "openstreetmap.org",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com",
+    "tiktok.com",
+    "x.com",
+    "twitter.com",
+    "wikipedia.org",
+    "yelp.com",
+    "tripadvisor.com",
+}
+_GENERIC_TOKENS = {
+    "dental",
+    "dentist",
+    "dentiste",
+    "dentisti",
+    "dentistry",
+    "clinic",
+    "clinica",
+    "clinique",
+    "studio",
+    "cabinet",
+    "centre",
+    "center",
+    "centro",
+    "praxis",
+    "zahnarzt",
+    "zahnarztpraxis",
+    "odontoiatrico",
+    "odontoiatrica",
+    "stomatologiczna",
+    "stomatologia",
+    "laboratorio",
+    "laboratory",
+}
 
 
 def submit_job(job_id: str) -> None:
@@ -31,6 +75,116 @@ def submit_job(job_id: str) -> None:
 
 def _run_job_sync(job_id: str) -> None:
     asyncio.run(_run_job(job_id))
+
+
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
+
+
+def _distinctive_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", _fold(value))
+        if len(token) >= 4 and token not in _GENERIC_TOKENS
+    }
+
+
+def _usable_business_hit(hit: SearchHit, record: OsmContactRecord) -> bool:
+    host = domain_of(hit.url).removeprefix("www.")
+    if not host or any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
+        return False
+    if hit.url.lower().endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx")):
+        return False
+    tokens = _distinctive_tokens(record.organization)
+    if not tokens:
+        return True
+    haystack = _fold(" ".join((host, hit.title or "", hit.description or "")))
+    return any(token in haystack for token in tokens)
+
+
+def _round_robin_records(records: list[OsmContactRecord], limit: int) -> list[OsmContactRecord]:
+    by_country: dict[str, deque[OsmContactRecord]] = defaultdict(deque)
+    for record in records:
+        by_country[record.country].append(record)
+    selected: list[OsmContactRecord] = []
+    country_queue = deque(by_country)
+    while country_queue and len(selected) < limit:
+        country = country_queue.popleft()
+        queue = by_country[country]
+        if queue:
+            selected.append(queue.popleft())
+        if queue:
+            country_queue.append(country)
+    return selected
+
+
+async def _provider_hits(
+    query: str,
+    brave: BraveSearchProvider,
+    bing: BingRssSearchProvider,
+    public: PublicSearchProvider,
+    diagnostics: list[str],
+    count: int = 8,
+) -> list[SearchHit]:
+    hits: list[SearchHit] = []
+    if brave.configured:
+        try:
+            hits = await brave.search(query, count=count)
+        except Exception as exc:
+            diagnostics.append(f"Brave exact={type(exc).__name__}")
+    if not hits and bing.configured:
+        try:
+            hits = await bing.search(query, count=count)
+        except Exception as exc:
+            diagnostics.append(f"BingRSS exact={type(exc).__name__}")
+    if not hits and public.configured:
+        try:
+            hits = await public.search(query, count=count)
+        except Exception as exc:
+            diagnostics.append(f"DuckDuckGo exact={type(exc).__name__}")
+    return hits
+
+
+async def _resolve_named_records(
+    records: list[OsmContactRecord],
+    brave: BraveSearchProvider,
+    bing: BingRssSearchProvider,
+    public: PublicSearchProvider,
+    diagnostics: list[str],
+    max_results: int,
+) -> list[OsmContactRecord]:
+    unresolved = [record for record in records if not record.website]
+    if not unresolved:
+        return []
+
+    # Public HTML/RSS endpoints are intentionally kept conservative. A configured
+    # search API enables a much larger exact-name resolution batch.
+    lookup_limit = min(max_results * 2, 240 if brave.configured else 60)
+    selected = _round_robin_records(unresolved, lookup_limit)
+    semaphore = asyncio.Semaphore(6 if brave.configured else 3)
+
+    async def resolve(record: OsmContactRecord) -> OsmContactRecord | None:
+        location = " ".join(part for part in (record.city, record.country) if part)
+        query = f'"{record.organization}" {location} sito ufficiale contatti email'
+        async with semaphore:
+            hits = await _provider_hits(query, brave, bing, public, diagnostics)
+        for hit in hits:
+            if not _usable_business_hit(hit, record):
+                continue
+            record.website = canonical_url(hit.url)
+            return record if record.website else None
+        return None
+
+    results = await asyncio.gather(
+        *(resolve(record) for record in selected),
+        return_exceptions=True,
+    )
+    resolved = [result for result in results if isinstance(result, OsmContactRecord)]
+    diagnostics.append(
+        f"Risoluzione per nome: {len(resolved)} siti trovati su {len(selected)} strutture tentate"
+    )
+    return resolved
 
 
 async def _discover(
@@ -52,8 +206,8 @@ async def _discover(
     if osm.configured_for(job.sector, countries):
         country_count = max(len(countries), 1)
         per_country_limit = min(
-            120,
-            max(35, (job.max_results * 2 // country_count) + 20),
+            300,
+            max(80, (job.max_results * 3 // country_count) + 40),
         )
         semaphore = asyncio.Semaphore(2)
 
@@ -72,21 +226,32 @@ async def _discover(
             records, detail = result
             diagnostics.append(detail)
             osm_records.extend(records)
-            for record in records:
-                if not record.website:
-                    continue
-                urls.append(record.website)
-                host = domain_of(record.website).removeprefix("www.")
-                if host and host not in domain_hints:
-                    domain_hints[host] = record
 
     brave = BraveSearchProvider(settings)
     bing = BingRssSearchProvider(settings)
     public = PublicSearchProvider(settings)
+
+    resolved_records = await _resolve_named_records(
+        osm_records,
+        brave,
+        bing,
+        public,
+        diagnostics,
+        job.max_results,
+    )
+    for record in osm_records:
+        if not record.website:
+            continue
+        urls.append(record.website)
+        host = domain_of(record.website).removeprefix("www.")
+        if host and host not in domain_hints:
+            domain_hints[host] = record
+    # `resolved_records` is already part of osm_records; this count is diagnostic only.
+    if resolved_records:
+        diagnostics.append(f"Siti ufficiali aggiunti da nomi OSM: {len(resolved_records)}")
+
     queries = build_queries(job.sector, countries, job.cities or [], job.keywords or [])
-    # Guarantee at least two queries per requested country even when the environment
-    # still contains an older conservative PUBLIC_SEARCH_MAX_QUERIES value.
-    minimum_country_queries = min(30, max(len(countries) * 2, 1))
+    minimum_country_queries = min(40, max(len(countries) * 3, 1))
     query_limit = len(queries) if brave.configured else max(
         settings.public_search_max_queries,
         minimum_country_queries,
@@ -95,42 +260,30 @@ async def _discover(
     per_query = min(20, max(5, settings.search_result_limit // max(len(selected_queries), 1)))
 
     for query in selected_queries:
-        hits = []
-
-        if brave.configured:
-            try:
-                hits = await brave.search(query, count=per_query)
-                diagnostics.append(f"Brave={len(hits)}")
-            except Exception as exc:
-                diagnostics.append(f"Brave={type(exc).__name__}")
-
-        if not hits and bing.configured:
-            try:
-                hits = await bing.search(query, count=min(per_query, 12))
-                diagnostics.append(f"BingRSS={len(hits)}")
-            except Exception as exc:
-                diagnostics.append(f"BingRSS={type(exc).__name__}")
-
-        if not hits and public.configured:
-            try:
-                hits = await public.search(query, count=min(per_query, 12))
-                diagnostics.append(f"DuckDuckGo={len(hits)}")
-            except Exception as exc:
-                diagnostics.append(f"DuckDuckGo={type(exc).__name__}")
-
+        hits = await _provider_hits(
+            query,
+            brave,
+            bing,
+            public,
+            diagnostics,
+            count=min(per_query, 12),
+        )
         urls.extend(hit.url for hit in hits)
 
     unique: list[str] = []
     seen_domains: set[str] = set()
-    max_domains = max(60, job.max_results * 2)
+    max_domains = max(100, job.max_results * 3)
     for url in urls:
         host = (urlparse(url).hostname or "").lower().removeprefix("www.")
         if not host or host in seen_domains:
+            continue
+        if any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
             continue
         seen_domains.add(host)
         unique.append(url)
         if len(unique) >= max_domains:
             break
+    diagnostics.append(f"Domini unici pronti per il crawler: {len(unique)}")
     return unique, osm_records, domain_hints, diagnostics
 
 
@@ -139,7 +292,7 @@ def _save_osm_contacts(
     records: list[OsmContactRecord],
     db,
 ) -> SearchJob:
-    """Save structured public contacts only when non-official sources are allowed."""
+    """Save public directory contacts when broad collection is selected."""
     if job.official_sources_only:
         return job
 
@@ -179,8 +332,9 @@ def _save_osm_contacts(
                 reliability="medium",
                 status="public_directory",
                 notes=(
-                    "Contatto pubblico scoperto tramite OpenStreetMap; verificare sul sito ufficiale "
-                    "prima dell'uso commerciale. Dati OSM © OpenStreetMap contributors."
+                    "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
+                    "Ricontrollare sul sito ufficiale prima di campagne massive. "
+                    "Dati OSM © OpenStreetMap contributors."
                 ),
                 fingerprint=fingerprint,
             )
@@ -213,7 +367,7 @@ async def _run_job(job_id: str) -> None:
 
         urls, osm_records, domain_hints, diagnostics = await _discover(job)
         job.discovered_urls = len(urls)
-        for detail in diagnostics[-30:]:
+        for detail in diagnostics[-50:]:
             db.add(CrawlLog(job_id=job.id, url="", action="discovery", detail=detail))
         db.commit()
 
@@ -228,7 +382,7 @@ async def _run_job(job_id: str) -> None:
             raise RuntimeError(
                 "Nessun sito trovato dai motori disponibili. "
                 f"Diagnostica: {details}. "
-                "Per una copertura più ampia configura BRAVE_SEARCH_API_KEY oppure inserisci URL iniziali."
+                "Per la massima copertura configura BRAVE_SEARCH_API_KEY oppure usa la raccolta ampia."
             )
 
         country_hint = job.countries[0] if len(job.countries or []) == 1 else None

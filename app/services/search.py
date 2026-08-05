@@ -159,6 +159,16 @@ LOCAL_DENTAL_TERMS = {
     "portugal": "clinica dentaria dentista laboratorio de protese dentaria",
     "svizzera": "Zahnarztpraxis cabinet dentaire studio dentistico Dentallabor",
     "switzerland": "Zahnarztpraxis cabinet dentaire studio dentistico Dentallabor",
+    "belgio": "cabinet dentaire tandartspraktijk clinique dentaire tandlaboratorium",
+    "belgium": "cabinet dentaire tandartspraktijk clinique dentaire tandlaboratorium",
+    "irlanda": "dental practice dental clinic dental laboratory",
+    "ireland": "dental practice dental clinic dental laboratory",
+    "danimarca": "tandlægeklinik tandlæge tandteknisk laboratorium",
+    "denmark": "tandlægeklinik tandlæge tandteknisk laboratorium",
+    "svezia": "tandläkarklinik tandläkare tandtekniskt laboratorium",
+    "sweden": "tandläkarklinik tandläkare tandtekniskt laboratorium",
+    "norvegia": "tannklinikk tannlege tannteknisk laboratorium",
+    "norway": "tannklinikk tannlege tannteknisk laboratorium",
 }
 
 
@@ -177,12 +187,15 @@ def build_queries(sector: str, countries: list[str], cities: list[str], keywords
         local_sector = LOCAL_DENTAL_TERMS.get(_fold(location), sector) if dental else sector
         bases.append(" ".join(part for part in (local_sector, location, extra) if part).strip())
 
-    # Round-robin by query type: with a low public-query limit, every country gets
-    # at least one discovery query instead of spending the quota on the first countries.
+    # Query types are interleaved by country so that a finite quota covers every
+    # requested market before adding deeper variations.
     suffixes = (
         "contact email official website",
         "contatti email sito ufficiale",
         "telefono email",
+        "filetype:pdf email telefono elenco",
+        "associazione ordine albo directory contatti email",
+        "sedi locations reception segreteria email",
     )
     queries: list[str] = []
     for suffix in suffixes:

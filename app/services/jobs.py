@@ -83,6 +83,15 @@ def _fold(value: str) -> str:
     return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
 
 
+def _email_groups(emails: list[str], *, broad: bool) -> list[list[str]]:
+    unique = list(dict.fromkeys(email.strip().lower() for email in emails if email.strip()))
+    if not unique:
+        return [[]]
+    if broad:
+        return [[email] for email in unique]
+    return [unique]
+
+
 def _distinctive_tokens(value: str) -> set[str]:
     return {
         token
@@ -351,43 +360,46 @@ def _save_osm_contacts(
 
         website = record.website or record.source_url
         domain = domain_of(website) or "openstreetmap.org"
-        fingerprint = contact_fingerprint(domain, selected_emails, selected_phones)
-        db.add(
-            Contact(
-                job_id=job.id,
-                organization=record.organization,
-                category=record.category,
-                country=record.country,
-                city=record.city,
-                address=selected_address,
-                website=website,
-                domain=domain,
-                emails=selected_emails,
-                phones=selected_phones,
-                whatsapp=[],
-                specialties=[],
-                source_url=record.source_url,
-                source_type="openstreetmap",
-                reliability="medium",
-                status="public_directory",
-                notes=(
-                    "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
-                    "Ricontrollare sul sito ufficiale prima di campagne massive. "
-                    "Dati OSM © OpenStreetMap contributors."
-                ),
-                fingerprint=fingerprint,
+        for email_group in _email_groups(selected_emails, broad=True):
+            if job.contacts_found >= job.max_results:
+                break
+            fingerprint = contact_fingerprint(domain, email_group, selected_phones)
+            db.add(
+                Contact(
+                    job_id=job.id,
+                    organization=record.organization,
+                    category=record.category,
+                    country=record.country,
+                    city=record.city,
+                    address=selected_address,
+                    website=website,
+                    domain=domain,
+                    emails=email_group,
+                    phones=selected_phones,
+                    whatsapp=[],
+                    specialties=[],
+                    source_url=record.source_url,
+                    source_type="openstreetmap",
+                    reliability="medium",
+                    status="public_directory",
+                    notes=(
+                        "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
+                        "Ricontrollare sul sito ufficiale prima di campagne massive. "
+                        "Dati OSM © OpenStreetMap contributors."
+                    ),
+                    fingerprint=fingerprint,
+                )
             )
-        )
-        try:
-            db.flush()
-            job.contacts_found += 1
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            job = db.get(SearchJob, job.id)
-            if job:
-                job.duplicates_skipped += 1
+            try:
+                db.flush()
+                job.contacts_found += 1
                 db.commit()
+            except IntegrityError:
+                db.rollback()
+                job = db.get(SearchJob, job.id)
+                if job:
+                    job.duplicates_skipped += 1
+                    db.commit()
     return db.get(SearchJob, job.id) or job
 
 
@@ -485,50 +497,63 @@ async def _run_job(job_id: str) -> None:
                 db.commit()
                 continue
 
-            fingerprint = contact_fingerprint(
-                candidate.domain,
-                selected_emails,
-                selected_phones or selected_whatsapp,
-            )
             organization = (
                 candidate.organization
                 or (hint.organization if hint else None)
                 or candidate.domain.split(".")[0].replace("-", " ").title()
             )
-            contact = Contact(
-                job_id=job.id,
-                organization=organization[:300],
-                category=(hint.category if hint else job.sector)[:200],
-                country=hint.country if hint else country_hint,
-                city=candidate.city or (hint.city if hint else None) or city_hint,
-                address=selected_address,
-                website=candidate.website,
-                domain=candidate.domain,
-                emails=selected_emails,
-                phones=selected_phones,
-                whatsapp=selected_whatsapp,
-                specialties=candidate.specialties,
-                source_url=candidate.source_url,
-                source_type="official_website",
-                reliability=reliability_for(selected_emails, candidate.website),
-                status="verified_public",
-                notes=(
-                    "Contatto estratto da una pagina pubblica del sito ufficiale. Verificare finalità "
-                    "e base giuridica prima dell'uso commerciale."
-                ),
-                fingerprint=fingerprint,
+            source_is_pdf = candidate.source_url.casefold().split("?", 1)[0].endswith(".pdf")
+            source_type = "public_pdf" if source_is_pdf else "official_website"
+            note = (
+                "Contatto estratto da un PDF pubblicamente accessibile. Verificare attualità e fonte "
+                "prima dell'uso commerciale."
+                if source_is_pdf
+                else "Contatto estratto da una pagina pubblica del sito. Verificare finalità e base "
+                "giuridica prima dell'uso commerciale."
             )
-            db.add(contact)
-            try:
-                db.flush()
-                job.contacts_found += 1
-                db.commit()
-            except IntegrityError:
-                db.rollback()
-                job = db.get(SearchJob, job_id)
-                if job:
-                    job.duplicates_skipped += 1
+
+            for email_group in _email_groups(
+                selected_emails,
+                broad=not job.official_sources_only,
+            ):
+                if job.contacts_found >= job.max_results:
+                    break
+                fingerprint = contact_fingerprint(
+                    candidate.domain,
+                    email_group,
+                    selected_phones or selected_whatsapp,
+                )
+                contact = Contact(
+                    job_id=job.id,
+                    organization=organization[:300],
+                    category=(hint.category if hint else job.sector)[:200],
+                    country=hint.country if hint else country_hint,
+                    city=candidate.city or (hint.city if hint else None) or city_hint,
+                    address=selected_address,
+                    website=candidate.website,
+                    domain=candidate.domain,
+                    emails=email_group,
+                    phones=selected_phones,
+                    whatsapp=selected_whatsapp,
+                    specialties=candidate.specialties,
+                    source_url=candidate.source_url,
+                    source_type=source_type,
+                    reliability=reliability_for(email_group, candidate.website),
+                    status="verified_public",
+                    notes=note,
+                    fingerprint=fingerprint,
+                )
+                db.add(contact)
+                try:
+                    db.flush()
+                    job.contacts_found += 1
                     db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    job = db.get(SearchJob, job_id)
+                    if job:
+                        job.duplicates_skipped += 1
+                        db.commit()
 
         job = db.get(SearchJob, job_id)
         if job:

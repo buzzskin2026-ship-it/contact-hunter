@@ -99,9 +99,26 @@ def search_detail(job_id: str, request: Request, db: Session = Depends(get_db)):
     job = db.get(SearchJob, job_id)
     if not job:
         raise HTTPException(404, "Ricerca non trovata")
-    contacts = list(db.scalars(select(Contact).where(Contact.job_id == job_id).order_by(Contact.id.desc()).limit(200)))
-    logs = list(db.scalars(select(CrawlLog).where(CrawlLog.job_id == job_id).order_by(CrawlLog.id.desc()).limit(80)))
+    contacts = list(db.scalars(select(Contact).where(Contact.job_id == job_id).order_by(Contact.id.desc()).limit(500)))
+    logs = list(db.scalars(select(CrawlLog).where(CrawlLog.job_id == job_id).order_by(CrawlLog.id.desc()).limit(150)))
     return templates.TemplateResponse(request, "search_detail.html", {"job": job, "contacts": contacts, "logs": logs})
+
+
+def _clone_search(original: SearchJob, *, broad: bool = False) -> SearchJob:
+    fields = list(original.requested_fields or ["email", "phone"])
+    if broad:
+        fields = list(dict.fromkeys([*fields, "email", "phone", "whatsapp", "address"]))
+    return SearchJob(
+        sector=original.sector,
+        countries=list(original.countries or []),
+        cities=list(original.cities or []),
+        keywords=list(original.keywords or []),
+        seed_urls=list(original.seed_urls or []),
+        requested_fields=fields,
+        max_results=max(original.max_results, 500) if broad else original.max_results,
+        official_sources_only=False if broad else original.official_sources_only,
+        exclude_free_email_providers=False if broad else original.exclude_free_email_providers,
+    )
 
 
 @router.post("/searches/{job_id}/retry", dependencies=[Depends(require_admin)])
@@ -109,17 +126,20 @@ def retry_search(job_id: str, db: Session = Depends(get_db)):
     original = db.get(SearchJob, job_id)
     if not original:
         raise HTTPException(404, "Ricerca non trovata")
-    job = SearchJob(
-        sector=original.sector,
-        countries=list(original.countries or []),
-        cities=list(original.cities or []),
-        keywords=list(original.keywords or []),
-        seed_urls=list(original.seed_urls or []),
-        requested_fields=list(original.requested_fields or ["email", "phone"]),
-        max_results=original.max_results,
-        official_sources_only=original.official_sources_only,
-        exclude_free_email_providers=original.exclude_free_email_providers,
-    )
+    job = _clone_search(original)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    submit_job(job.id)
+    return RedirectResponse(f"/searches/{job.id}", status_code=303)
+
+
+@router.post("/searches/{job_id}/broad-retry", dependencies=[Depends(require_admin)])
+def broad_retry_search(job_id: str, db: Session = Depends(get_db)):
+    original = db.get(SearchJob, job_id)
+    if not original:
+        raise HTTPException(404, "Ricerca non trovata")
+    job = _clone_search(original, broad=True)
     db.add(job)
     db.commit()
     db.refresh(job)

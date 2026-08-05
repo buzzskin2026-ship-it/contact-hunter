@@ -36,7 +36,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     jobs = list(db.scalars(select(SearchJob).order_by(SearchJob.created_at.desc()).limit(30)))
     total_contacts = db.scalar(select(func.count(Contact.id))) or 0
     countries = db.scalar(select(func.count(func.distinct(Contact.country)))) or 0
-    high_quality = db.scalar(select(func.count(Contact.id).where(Contact.reliability == "high"))) or 0
+    high_quality = db.scalar(
+        select(func.count(Contact.id)).where(Contact.reliability == "high")
+    ) or 0
     return templates.TemplateResponse(request, "dashboard.html", {
         "jobs": jobs,
         "total_contacts": total_contacts,

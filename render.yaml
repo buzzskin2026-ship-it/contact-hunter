@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: contact-hunter
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: contact-hunter-db
+          property: connectionString
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: SEARCH_RESULT_LIMIT
+        value: "60"
+      - key: CRAWLER_USER_AGENT
+        value: "ContactHunter/0.1"
+      - key: CRAWLER_DELAY_SECONDS
+        value: "1.5"
+      - key: CRAWLER_TIMEOUT_SECONDS
+        value: "25"
+      - key: CRAWLER_MAX_PAGES_PER_DOMAIN
+        value: "6"
+      - key: CRAWLER_MAX_RESPONSE_BYTES
+        value: "2000000"
+      - key: CRAWLER_CONCURRENCY
+        value: "1"
+      - key: RESPECT_ROBOTS_TXT
+        value: "true"
+      - key: PLAYWRIGHT_ENABLED
+        value: "true"
+      - key: KEEP_PAGE_SNAPSHOTS
+        value: "false"
+
+databases:
+  - name: contact-hunter-db
+    plan: free
+    region: frankfurt
+    databaseName: contact_hunter
+    user: contact_hunter
+    ipAllowList: []

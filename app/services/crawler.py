@@ -5,7 +5,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 
@@ -13,6 +13,22 @@ from app.config import Settings
 from app.services.extractor import ExtractedPage, extract_page
 from app.services.normalizer import canonical_url, domain_of, is_same_or_subdomain, root_url, url_is_allowed
 from app.services.robots import RobotsCache
+
+
+_CONTACT_PATHS = (
+    "contact",
+    "contacts",
+    "contact-us",
+    "contatti",
+    "kontakt",
+    "kontakte",
+    "contacto",
+    "contactos",
+    "impressum",
+    "legal-notice",
+    "about",
+    "chi-siamo",
+)
 
 
 @dataclass
@@ -164,7 +180,7 @@ class ContactCrawler:
                 if len(html.encode("utf-8")) > self.settings.crawler_max_response_bytes:
                     return PageResult(final_url, status_code, None, "ignored", "pagina oltre il limite di dimensione")
                 return PageResult(final_url, status_code, html, "playwright")
-        except Exception as exc:  # Playwright has a broad exception hierarchy.
+        except Exception as exc:
             return PageResult(url, None, None, "error", f"Playwright: {exc}")
 
     async def fetch(self, url: str) -> PageResult:
@@ -186,12 +202,20 @@ class ContactCrawler:
         if not normalized_start:
             raise ValueError("URL iniziale non valida")
         parent_domain = domain_of(normalized_start).removeprefix("www.")
-        queue: deque[str] = deque([normalized_start, root_url(normalized_start)])
+        base_root = root_url(normalized_start)
+        seeds = [normalized_start, base_root]
+        seeds.extend(urljoin(f"{base_root}/", path) for path in _CONTACT_PATHS)
+        queue: deque[str] = deque(dict.fromkeys(seeds))
         visited: set[str] = set()
         pages: list[tuple[str, ExtractedPage]] = []
         logs: list[PageResult] = []
+        attempt_limit = max(self.settings.crawler_max_pages_per_domain * 4, 16)
 
-        while queue and len(visited) < self.settings.crawler_max_pages_per_domain:
+        while (
+            queue
+            and len(pages) < self.settings.crawler_max_pages_per_domain
+            and len(visited) < attempt_limit
+        ):
             url = queue.popleft()
             canonical = canonical_url(url)
             if not canonical or canonical in visited:

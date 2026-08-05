@@ -12,8 +12,8 @@ from app.db import SessionLocal
 from app.models import Contact, CrawlLog, JobStatus, SearchJob
 from app.services.crawler import ContactCrawler
 from app.services.extractor import reliability_for
-from app.services.normalizer import canonical_url, contact_fingerprint, is_free_email, root_url
-from app.services.search import BraveSearchProvider, build_queries
+from app.services.normalizer import canonical_url, contact_fingerprint, is_free_email
+from app.services.search import BraveSearchProvider, PublicSearchProvider, build_queries
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-job")
 
@@ -34,17 +34,26 @@ async def _discover(job: SearchJob) -> list[str]:
         if normalized:
             urls.append(normalized)
 
-    provider = BraveSearchProvider(settings)
-    if provider.configured:
-        queries = build_queries(job.sector, job.countries or [], job.cities or [], job.keywords or [])
-        per_query = min(20, max(5, settings.search_result_limit // max(len(queries), 1)))
-        for query in queries:
+    brave = BraveSearchProvider(settings)
+    public = PublicSearchProvider(settings)
+    queries = build_queries(job.sector, job.countries or [], job.cities or [], job.keywords or [])
+    query_limit = len(queries) if brave.configured else settings.public_search_max_queries
+    selected_queries = queries[:query_limit]
+    per_query = min(20, max(5, settings.search_result_limit // max(len(selected_queries), 1)))
+
+    for query in selected_queries:
+        hits = []
+        if brave.configured:
             try:
-                hits = await provider.search(query, count=per_query)
-                urls.extend(hit.url for hit in hits)
+                hits = await brave.search(query, count=per_query)
             except Exception:
-                # A failed search query does not invalidate user-provided seed URLs or other queries.
-                continue
+                hits = []
+        if not hits and public.configured:
+            try:
+                hits = await public.search(query, count=min(per_query, 12))
+            except Exception:
+                hits = []
+        urls.extend(hit.url for hit in hits)
 
     unique: list[str] = []
     seen_domains: set[str] = set()
@@ -77,7 +86,8 @@ async def _run_job(job_id: str) -> None:
         db.commit()
         if not urls:
             raise RuntimeError(
-                "Nessun URL da analizzare. Configura BRAVE_SEARCH_API_KEY oppure inserisci URL iniziali nella ricerca."
+                "Nessun sito trovato. Il motore pubblico può essere temporaneamente limitato: "
+                "riprova, configura BRAVE_SEARCH_API_KEY oppure inserisci alcuni URL iniziali."
             )
 
         country_hint = job.countries[0] if len(job.countries or []) == 1 else None
@@ -106,13 +116,15 @@ async def _run_job(job_id: str) -> None:
 
             job.crawled_pages += candidate.pages_crawled
             for log in candidate.logs:
-                db.add(CrawlLog(
-                    job_id=job.id,
-                    url=log.url,
-                    status_code=log.status_code,
-                    action=log.action,
-                    detail=log.detail,
-                ))
+                db.add(
+                    CrawlLog(
+                        job_id=job.id,
+                        url=log.url,
+                        status_code=log.status_code,
+                        action=log.action,
+                        detail=log.detail,
+                    )
+                )
                 if log.action in {"blocked", "robots_blocked"}:
                     job.blocked_urls += 1
 

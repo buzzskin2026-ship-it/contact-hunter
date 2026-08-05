@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.config import get_settings
-from app.db import Base, engine
+from app.db import init_db
 from app.security import require_admin
 
 
@@ -17,7 +17,7 @@ from app.security import require_admin
 async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.ensure_directories()
-    Base.metadata.create_all(bind=engine)
+    init_db()
     yield
 
 

@@ -1,10 +1,10 @@
-from app.models import SearchJob
 from app.api.routes import _clone_search
+from app.models import SearchJob
 from app.services.extractor import extract_page
+from app.services.jobs import _email_groups
 
 
 def test_extracts_obfuscated_cloudflare_and_structured_contacts():
-    # Cloudflare encoding for info@example.com, generated with a fixed XOR key.
     email = "info@example.com"
     key = 0x42
     cfemail = f"{key:02x}" + "".join(f"{ord(char) ^ key:02x}" for char in email)
@@ -41,3 +41,15 @@ def test_broad_retry_expands_fields_and_limits_without_private_sources():
     assert broad.official_sources_only is False
     assert broad.exclude_free_email_providers is False
     assert {"email", "phone", "whatsapp", "address"}.issubset(broad.requested_fields)
+
+
+def test_broad_mode_creates_one_export_record_per_unique_email():
+    emails = ["INFO@EXAMPLE.COM", "reception@example.com", "info@example.com"]
+    assert _email_groups(emails, broad=True) == [
+        ["info@example.com"],
+        ["reception@example.com"],
+    ]
+    assert _email_groups(emails, broad=False) == [[
+        "info@example.com",
+        "reception@example.com",
+    ]]

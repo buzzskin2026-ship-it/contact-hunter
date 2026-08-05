@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Database · Contact Hunter{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">DATABASE</span><h1>{{ total }} contatti</h1><p>Filtra, controlla la fonte ed esporta solo i dati che ti servono.</p></div><div class="toolbar"><a class="button secondary" href="/exports/xlsx">Excel</a><a class="button ghost" href="/exports/csv">CSV</a></div></section>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Cerca struttura o dominio">
+  <select name="country"><option value="">Tutti i paesi</option>{% for item in countries %}<option value="{{ item }}" {% if item == country %}selected{% endif %}>{{ item }}</option>{% endfor %}</select>
+  <select name="reliability"><option value="">Qualsiasi affidabilità</option><option value="high" {% if reliability == 'high' %}selected{% endif %}>Alta</option><option value="medium" {% if reliability == 'medium' %}selected{% endif %}>Media</option><option value="low" {% if reliability == 'low' %}selected{% endif %}>Bassa</option></select>
+  <button class="button primary" type="submit">Filtra</button>
+</form>
+<section class="panel"><div class="table-wrap"><table><thead><tr><th>Struttura</th><th>Categoria</th><th>Paese / città</th><th>Email</th><th>Telefoni</th><th>Affidabilità</th><th>Fonte</th></tr></thead><tbody>
+{% for contact in contacts %}<tr><td><strong>{{ contact.organization }}</strong><small><a href="{{ contact.website }}" target="_blank" rel="noopener">{{ contact.domain }}</a></small></td><td>{{ contact.category or '' }}</td><td>{{ contact.country or '' }}{% if contact.city %}<small>{{ contact.city }}</small>{% endif %}</td><td>{% for email in contact.emails %}<a href="mailto:{{ email }}">{{ email }}</a>{% if not loop.last %}<br>{% endif %}{% endfor %}</td><td>{{ contact.phones|join('<br>')|safe }}</td><td><span class="quality {{ contact.reliability }}">{{ contact.reliability }}</span></td><td><a href="{{ contact.source_url }}" target="_blank" rel="noopener">Verifica</a></td></tr>{% else %}<tr><td colspan="7" class="empty">Nessun risultato.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% if total > page_size %}<nav class="pagination">{% if page > 1 %}<a href="?q={{ q }}&country={{ country }}&reliability={{ reliability }}&page={{ page-1 }}">← Precedente</a>{% endif %}<span>Pagina {{ page }}</span>{% if page * page_size < total %}<a href="?q={{ q }}&country={{ country }}&reliability={{ reliability }}&page={{ page+1 }}">Successiva →</a>{% endif %}</nav>{% endif %}
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Contact Hunter{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <span class="eyebrow">CONTROLLO CENTRALE</span>
+    <h1>Trova, verifica e organizza contatti B2B.</h1>
+    <p>Definisci settore e territorio. Il sistema scopre i siti ufficiali, estrae email e telefoni, deduplica e conserva la fonte.</p>
+  </div>
+  <a class="button primary" href="/searches/new">Avvia una ricerca</a>
+</section>
+
+<section class="metrics">
+  <article><span>Contatti</span><strong>{{ total_contacts }}</strong><small>record unici nel database</small></article>
+  <article><span>Paesi</span><strong>{{ countries }}</strong><small>copertura corrente</small></article>
+  <article><span>Affidabilità alta</span><strong>{{ high_quality }}</strong><small>email sul dominio ufficiale</small></article>
+</section>
+
+<section class="panel split">
+  <div>
+    <div class="section-heading"><div><span class="eyebrow">RICERCHE</span><h2>Attività recenti</h2></div></div>
+    {% if jobs %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Settore</th><th>Territorio</th><th>Stato</th><th>Trovati</th><th>Data</th></tr></thead>
+        <tbody>
+        {% for job in jobs %}
+          <tr>
+            <td><a class="row-link" href="/searches/{{ job.id }}">{{ job.sector }}</a></td>
+            <td>{{ (job.cities or job.countries)|join(', ') or 'URL forniti' }}</td>
+            <td><span class="status {{ job.status }}">{{ job.status }}</span></td>
+            <td>{{ job.contacts_found }}</td>
+            <td>{{ job.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<p class="empty">Non ci sono ancora ricerche.</p>{% endif %}
+  </div>
+  <aside class="import-card">
+    <span class="eyebrow">IMPORTA</span>
+    <h2>Carica il database esistente</h2>
+    <p>Puoi importare il censimento Excel già costruito. Le email duplicate vengono ignorate.</p>
+    <form action="/imports/xlsx" method="post" enctype="multipart/form-data">
+      <label class="file-input"><input type="file" name="file" accept=".xlsx" required><span>Seleziona file XLSX</span></label>
+      <button class="button secondary" type="submit">Importa contatti</button>
+    </form>
+    <div class="export-links">
+      <a href="/exports/xlsx">Esporta tutto in Excel</a>
+      <a href="/exports/csv">Esporta tutto in CSV</a>
+    </div>
+  </aside>
+</section>
+{% endblock %}

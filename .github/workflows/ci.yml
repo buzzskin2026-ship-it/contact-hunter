@@ -1,0 +1,38 @@
+name: Test e build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Installa dipendenze
+        run: python -m pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        env:
+          AUTH_ENABLED: "false"
+          DATABASE_URL: sqlite:///./data/test.db
+          PLAYWRIGHT_ENABLED: "false"
+        run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v6
+      - name: Costruisci immagine Docker
+        run: docker build -t contact-hunter:${{ github.sha }} .

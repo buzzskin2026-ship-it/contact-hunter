@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+data/*.db
+data/exports/*
+data/snapshots/*
+!data/exports/.gitkeep
+!data/snapshots/.gitkeep
+
+# Dati locali e import privati
+data/imports/*
+!data/imports/.gitkeep

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Contact Hunter{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">CH</span>
+      <span><strong>Contact Hunter</strong><small>Motore proprietario di contatti B2B</small></span>
+    </a>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/searches/new">Nuova ricerca</a>
+      <a href="/contacts">Database</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    Raccoglie esclusivamente dati professionali pubblici. Nessun accesso a login, CAPTCHA o aree protette.
+  </footer>
+</body>
+</html>

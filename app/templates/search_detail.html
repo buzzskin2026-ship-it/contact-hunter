@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ job.sector }} · Contact Hunter{% endblock %}
+{% block content %}
+<section class="page-heading" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}">
+  <div><span class="eyebrow">RICERCA {{ job.id[:8] }}</span><h1>{{ job.sector }}</h1><p>{{ (job.cities or job.countries)|join(', ') or 'Siti forniti manualmente' }}</p></div>
+  <span id="job-status" class="status large {{ job.status }}">{{ job.status }}</span>
+</section>
+<section class="metrics compact">
+  <article><span>URL scoperti</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
+  <article><span>Pagine analizzate</span><strong id="crawled-pages">{{ job.crawled_pages }}</strong></article>
+  <article><span>Contatti trovati</span><strong id="contacts-found">{{ job.contacts_found }}</strong></article>
+  <article><span>Duplicati</span><strong id="duplicates-skipped">{{ job.duplicates_skipped }}</strong></article>
+</section>
+{% if job.error_message %}<div class="alert error">{{ job.error_message }}</div>{% endif %}
+<div class="toolbar"><a class="button secondary" href="/exports/xlsx?job_id={{ job.id }}">Esporta Excel</a><a class="button ghost" href="/exports/csv?job_id={{ job.id }}">Esporta CSV</a></div>
+<section class="panel">
+  <div class="section-heading"><div><span class="eyebrow">RISULTATI</span><h2>Contatti della ricerca</h2></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Struttura</th><th>Località</th><th>Email</th><th>Telefono</th><th>Qualità</th><th>Fonte</th></tr></thead>
+      <tbody>
+      {% for contact in contacts %}
+        <tr>
+          <td><strong>{{ contact.organization }}</strong><small>{{ contact.domain }}</small></td>
+          <td>{{ contact.city or '' }}{% if contact.city and contact.country %}, {% endif %}{{ contact.country or '' }}</td>
+          <td>{% for email in contact.emails %}<a href="mailto:{{ email }}">{{ email }}</a>{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+          <td>{{ contact.phones|join('<br>')|safe }}</td>
+          <td><span class="quality {{ contact.reliability }}">{{ contact.reliability }}</span></td>
+          <td><a href="{{ contact.source_url }}" target="_blank" rel="noopener">Apri pagina</a></td>
+        </tr>
+      {% else %}<tr><td colspan="6" class="empty">Nessun contatto salvato al momento.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<details class="panel logs"><summary>Log tecnico ({{ logs|length }})</summary><div class="log-list">{% for log in logs %}<div><span>{{ log.action }}</span><code>{{ log.url }}</code><small>{{ log.detail or '' }}</small></div>{% endfor %}</div></details>
+{% endblock %}

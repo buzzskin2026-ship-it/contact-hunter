@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Contact, CrawlLog, JobStatus, SearchJob
+from app.services.commoncrawl import CommonCrawlUrlProvider
 from app.services.crawler import ContactCrawler
 from app.services.extractor import reliability_for
 from app.services.normalizer import (
@@ -94,7 +95,7 @@ def _usable_business_hit(hit: SearchHit, record: OsmContactRecord) -> bool:
     host = domain_of(hit.url).removeprefix("www.")
     if not host or any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
         return False
-    if hit.url.lower().endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx")):
+    if hit.url.lower().endswith((".doc", ".docx", ".xls", ".xlsx")):
         return False
     tokens = _distinctive_tokens(record.organization)
     if not tokens:
@@ -158,9 +159,7 @@ async def _resolve_named_records(
     if not unresolved:
         return []
 
-    # Public HTML/RSS endpoints are intentionally kept conservative. A configured
-    # search API enables a much larger exact-name resolution batch.
-    lookup_limit = min(max_results * 2, 240 if brave.configured else 60)
+    lookup_limit = min(max_results * 2, 300 if brave.configured else 120)
     selected = _round_robin_records(unresolved, lookup_limit)
     semaphore = asyncio.Semaphore(6 if brave.configured else 3)
 
@@ -185,6 +184,45 @@ async def _resolve_named_records(
         f"Risoluzione per nome: {len(resolved)} siti trovati su {len(selected)} strutture tentate"
     )
     return resolved
+
+
+async def _expand_with_common_crawl(
+    urls: list[str],
+    diagnostics: list[str],
+) -> list[str]:
+    settings = get_settings()
+    provider = CommonCrawlUrlProvider(settings)
+    if not provider.configured or settings.common_crawl_max_domains <= 0:
+        return urls
+
+    expanded: list[str] = []
+    replaced = 0
+    attempted = 0
+    for original in urls:
+        if attempted >= settings.common_crawl_max_domains:
+            expanded.append(original)
+            continue
+        host = domain_of(original).removeprefix("www.")
+        if not host:
+            expanded.append(original)
+            continue
+        attempted += 1
+        try:
+            archived_urls, _ = await provider.discover(host)
+        except Exception as exc:
+            if len(diagnostics) < 100:
+                diagnostics.append(f"Common Crawl {host}={type(exc).__name__}")
+            expanded.append(original)
+            continue
+        if archived_urls:
+            expanded.append(archived_urls[0].url)
+            replaced += 1
+        else:
+            expanded.append(original)
+    diagnostics.append(
+        f"Common Crawl: {replaced} domini avviati da una pagina contatti/PDF su {attempted} interrogati"
+    )
+    return expanded
 
 
 async def _discover(
@@ -246,12 +284,11 @@ async def _discover(
         host = domain_of(record.website).removeprefix("www.")
         if host and host not in domain_hints:
             domain_hints[host] = record
-    # `resolved_records` is already part of osm_records; this count is diagnostic only.
     if resolved_records:
         diagnostics.append(f"Siti ufficiali aggiunti da nomi OSM: {len(resolved_records)}")
 
     queries = build_queries(job.sector, countries, job.cities or [], job.keywords or [])
-    minimum_country_queries = min(40, max(len(countries) * 3, 1))
+    minimum_country_queries = min(60, max(len(countries) * 4, 1))
     query_limit = len(queries) if brave.configured else max(
         settings.public_search_max_queries,
         minimum_country_queries,
@@ -266,13 +303,13 @@ async def _discover(
             bing,
             public,
             diagnostics,
-            count=min(per_query, 12),
+            count=min(per_query, 15),
         )
         urls.extend(hit.url for hit in hits)
 
     unique: list[str] = []
     seen_domains: set[str] = set()
-    max_domains = max(100, job.max_results * 3)
+    max_domains = min(600, max(120, job.max_results * 2))
     for url in urls:
         host = (urlparse(url).hostname or "").lower().removeprefix("www.")
         if not host or host in seen_domains:
@@ -283,6 +320,8 @@ async def _discover(
         unique.append(url)
         if len(unique) >= max_domains:
             break
+
+    unique = await _expand_with_common_crawl(unique, diagnostics)
     diagnostics.append(f"Domini unici pronti per il crawler: {len(unique)}")
     return unique, osm_records, domain_hints, diagnostics
 
@@ -367,7 +406,7 @@ async def _run_job(job_id: str) -> None:
 
         urls, osm_records, domain_hints, diagnostics = await _discover(job)
         job.discovered_urls = len(urls)
-        for detail in diagnostics[-50:]:
+        for detail in diagnostics[-80:]:
             db.add(CrawlLog(job_id=job.id, url="", action="discovery", detail=detail))
         db.commit()
 

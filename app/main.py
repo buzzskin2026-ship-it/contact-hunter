@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.db import init_db
 from app.security import require_admin
 
-APP_RELEASE = "2026.08.05-search-v2"
+APP_RELEASE = "2026.08.05-discovery-v3"
 
 
 @asynccontextmanager
@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

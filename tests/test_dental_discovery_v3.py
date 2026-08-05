@@ -37,16 +37,18 @@ def test_dental_sector_detection():
     assert not supports_dental_sector("hotel e ristoranti")
 
 
-def test_queries_are_distributed_across_countries_before_second_variation():
+def test_queries_are_distributed_across_countries_before_deeper_variations():
     countries = ["Italia", "Francia", "Germania", "Spagna"]
     queries = build_queries("studi dentistici", countries, [], [])
-    assert len(queries) == 12
+    assert len(queries) == 24
     assert "Italia" in queries[0]
     assert "Francia" in queries[1]
     assert "Germania" in queries[2]
     assert "Spagna" in queries[3]
     assert "official website" in queries[0]
     assert "contatti email" in queries[4]
+    assert "filetype:pdf" in queries[12]
+    assert "associazione" in queries[16]
 
 
 def test_overpass_query_targets_all_named_dentists_and_labs():

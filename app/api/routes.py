@@ -104,6 +104,29 @@ def search_detail(job_id: str, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "search_detail.html", {"job": job, "contacts": contacts, "logs": logs})
 
 
+@router.post("/searches/{job_id}/retry", dependencies=[Depends(require_admin)])
+def retry_search(job_id: str, db: Session = Depends(get_db)):
+    original = db.get(SearchJob, job_id)
+    if not original:
+        raise HTTPException(404, "Ricerca non trovata")
+    job = SearchJob(
+        sector=original.sector,
+        countries=list(original.countries or []),
+        cities=list(original.cities or []),
+        keywords=list(original.keywords or []),
+        seed_urls=list(original.seed_urls or []),
+        requested_fields=list(original.requested_fields or ["email", "phone"]),
+        max_results=original.max_results,
+        official_sources_only=original.official_sources_only,
+        exclude_free_email_providers=original.exclude_free_email_providers,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    submit_job(job.id)
+    return RedirectResponse(f"/searches/{job.id}", status_code=303)
+
+
 @router.get("/contacts", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
 def contacts_page(
     request: Request,

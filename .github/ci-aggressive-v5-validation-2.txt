@@ -1,1 +1,1 @@
-Validation trigger after Ruff configuration correction and PR creation.
+Validation trigger after Ruff configuration correction, PR creation, and synchronize event.

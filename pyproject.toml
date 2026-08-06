@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contact-hunter"
-version = "0.5.0"
-description = "Motore proprietario per scoprire, verificare e deduplicare contatti B2B pubblici."
+version = "0.6.0"
+description = "Motore discovery-first per censire, verificare e deduplicare contatti B2B pubblici da web e open data."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -24,6 +24,7 @@ from app.services.normalizer import (
 )
 from app.services.search import BraveSearchProvider, PublicSearchProvider, SearchHit, build_queries
 from app.services.search_bing import BingRssSearchProvider
+from app.services.search_google_places import GooglePlacesProvider
 from app.services.search_osm import OpenStreetMapDentalProvider, OsmContactRecord
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-job")
@@ -129,6 +130,25 @@ def _round_robin_records(records: list[OsmContactRecord], limit: int) -> list[Os
     return selected
 
 
+def _dedupe_directory_records(records: list[OsmContactRecord]) -> list[OsmContactRecord]:
+    unique: list[OsmContactRecord] = []
+    seen: set[str] = set()
+    for record in records:
+        key = record.external_id or "|".join(
+            (
+                record.organization.casefold(),
+                (record.city or "").casefold(),
+                (record.address or "").casefold(),
+                record.website or "",
+            )
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(record)
+    return unique
+
+
 async def _provider_hits(
     query: str,
     brave: BraveSearchProvider,
@@ -168,9 +188,9 @@ async def _resolve_named_records(
     if not unresolved:
         return []
 
-    lookup_limit = min(max_results * 2, 300 if brave.configured else 120)
+    lookup_limit = min(max_results * 2, 2_500 if brave.configured else 300)
     selected = _round_robin_records(unresolved, lookup_limit)
-    semaphore = asyncio.Semaphore(6 if brave.configured else 3)
+    semaphore = asyncio.Semaphore(8 if brave.configured else 3)
 
     async def resolve(record: OsmContactRecord) -> OsmContactRecord | None:
         location = " ".join(part for part in (record.city, record.country) if part)
@@ -219,7 +239,7 @@ async def _expand_with_common_crawl(
         try:
             archived_urls, _ = await provider.discover(host)
         except Exception as exc:
-            if len(diagnostics) < 100:
+            if len(diagnostics) < 150:
                 diagnostics.append(f"Common Crawl {host}={type(exc).__name__}")
             expanded.append(original)
             continue
@@ -234,13 +254,47 @@ async def _expand_with_common_crawl(
     return expanded
 
 
+async def _discover_web_urls(
+    queries: list[str],
+    brave: BraveSearchProvider,
+    bing: BingRssSearchProvider,
+    public: PublicSearchProvider,
+    diagnostics: list[str],
+    limit: int,
+) -> list[str]:
+    selected = queries[:limit]
+    semaphore = asyncio.Semaphore(6 if brave.configured else 3)
+
+    async def run(query: str) -> list[SearchHit]:
+        async with semaphore:
+            return await _provider_hits(
+                query,
+                brave,
+                bing,
+                public,
+                diagnostics,
+                count=15,
+            )
+
+    results = await asyncio.gather(*(run(query) for query in selected), return_exceptions=True)
+    urls: list[str] = []
+    successful = 0
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        successful += 1
+        urls.extend(hit.url for hit in result)
+    diagnostics.append(f"Ricerca web/PDF: {successful} query completate su {len(selected)}")
+    return urls
+
+
 async def _discover(
     job: SearchJob,
 ) -> tuple[list[str], list[OsmContactRecord], dict[str, OsmContactRecord], list[str]]:
     settings = get_settings()
     urls: list[str] = []
     diagnostics: list[str] = []
-    osm_records: list[OsmContactRecord] = []
+    directory_records: list[OsmContactRecord] = []
     domain_hints: dict[str, OsmContactRecord] = {}
 
     for raw in job.seed_urls or []:
@@ -253,8 +307,8 @@ async def _discover(
     if osm.configured_for(job.sector, countries):
         country_count = max(len(countries), 1)
         per_country_limit = min(
-            300,
-            max(80, (job.max_results * 3 // country_count) + 40),
+            settings.osm_max_records_per_country,
+            max(1_000, (job.max_results * 2 // country_count) + 500),
         )
         semaphore = asyncio.Semaphore(2)
 
@@ -272,21 +326,44 @@ async def _discover(
                 continue
             records, detail = result
             diagnostics.append(detail)
-            osm_records.extend(records)
+            directory_records.extend(records)
+
+    google = GooglePlacesProvider(settings)
+    if not job.official_sources_only and google.configured:
+        requested_places = min(
+            settings.google_places_max_places,
+            max(2_000, job.max_results * 3),
+        )
+        try:
+            records, detail = await google.search(
+                job.sector,
+                countries,
+                list(job.cities or []),
+                requested_max_places=requested_places,
+            )
+            diagnostics.append(detail)
+            directory_records.extend(records)
+        except Exception as exc:
+            diagnostics.append(f"Google Places={type(exc).__name__}: {exc}")
+    elif not job.official_sources_only:
+        diagnostics.append("Google Places: GOOGLE_PLACES_API_KEY non configurata")
+
+    directory_records = _dedupe_directory_records(directory_records)
+    diagnostics.append(f"Directory aggregate: {len(directory_records)} attività uniche")
 
     brave = BraveSearchProvider(settings)
     bing = BingRssSearchProvider(settings)
     public = PublicSearchProvider(settings)
 
     resolved_records = await _resolve_named_records(
-        osm_records,
+        directory_records,
         brave,
         bing,
         public,
         diagnostics,
         job.max_results,
     )
-    for record in osm_records:
+    for record in directory_records:
         if not record.website:
             continue
         urls.append(record.website)
@@ -294,31 +371,27 @@ async def _discover(
         if host and host not in domain_hints:
             domain_hints[host] = record
     if resolved_records:
-        diagnostics.append(f"Siti ufficiali aggiunti da nomi OSM: {len(resolved_records)}")
+        diagnostics.append(f"Siti ufficiali aggiunti da nomi di attività: {len(resolved_records)}")
 
-    queries = build_queries(job.sector, countries, job.cities or [], job.keywords or [])
-    minimum_country_queries = min(60, max(len(countries) * 4, 1))
-    query_limit = len(queries) if brave.configured else max(
-        settings.public_search_max_queries,
-        minimum_country_queries,
+    queries = build_queries(job.sector, countries, list(job.cities or []), list(job.keywords or []))
+    web_query_limit = min(
+        len(queries),
+        settings.public_search_max_queries * (3 if brave.configured else 1),
     )
-    selected_queries = queries[: min(query_limit, len(queries))]
-    per_query = min(20, max(5, settings.search_result_limit // max(len(selected_queries), 1)))
-
-    for query in selected_queries:
-        hits = await _provider_hits(
-            query,
+    urls.extend(
+        await _discover_web_urls(
+            queries,
             brave,
             bing,
             public,
             diagnostics,
-            count=min(per_query, 15),
+            limit=web_query_limit,
         )
-        urls.extend(hit.url for hit in hits)
+    )
 
     unique: list[str] = []
     seen_domains: set[str] = set()
-    max_domains = min(600, max(120, job.max_results * 2))
+    max_domains = min(10_000, max(1_000, job.max_results * 3))
     for url in urls:
         host = (urlparse(url).hostname or "").lower().removeprefix("www.")
         if not host or host in seen_domains:
@@ -332,15 +405,28 @@ async def _discover(
 
     unique = await _expand_with_common_crawl(unique, diagnostics)
     diagnostics.append(f"Domini unici pronti per il crawler: {len(unique)}")
-    return unique, osm_records, domain_hints, diagnostics
+    return unique, directory_records, domain_hints, diagnostics
 
 
-def _save_osm_contacts(
+def _directory_note(record: OsmContactRecord) -> str:
+    if record.source_type == "google_places":
+        return (
+            "Attività professionale pubblica scoperta tramite Google Places API. "
+            "Il sito ufficiale viene analizzato separatamente per cercare email pubblicate."
+        )
+    return (
+        "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
+        "Dati OSM © OpenStreetMap contributors."
+    )
+
+
+def _save_directory_contacts(
     job: SearchJob,
     records: list[OsmContactRecord],
     db,
+    *,
+    defer_website_only: bool,
 ) -> SearchJob:
-    """Save public directory contacts when broad collection is selected."""
     if job.official_sources_only:
         return job
 
@@ -351,6 +437,12 @@ def _save_osm_contacts(
         selected_emails = record.emails if "email" in requested else []
         selected_phones = record.phones if "phone" in requested else []
         selected_address = record.address if "address" in requested else None
+
+        # A directory record with a website is first used as a discovery hint. It
+        # is saved as phone-only only after website crawling, so it cannot consume
+        # the result budget before email extraction starts.
+        if defer_website_only and record.website and not selected_emails:
+            continue
         if not selected_emails and not selected_phones:
             continue
         if job.exclude_free_email_providers and selected_emails and all(
@@ -359,7 +451,7 @@ def _save_osm_contacts(
             continue
 
         website = record.website or record.source_url
-        domain = domain_of(website) or "openstreetmap.org"
+        domain = domain_of(website) or record.source_type
         for email_group in _email_groups(selected_emails, broad=True):
             if job.contacts_found >= job.max_results:
                 break
@@ -379,14 +471,10 @@ def _save_osm_contacts(
                     whatsapp=[],
                     specialties=[],
                     source_url=record.source_url,
-                    source_type="openstreetmap",
+                    source_type=record.source_type,
                     reliability="medium",
                     status="public_directory",
-                    notes=(
-                        "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
-                        "Ricontrollare sul sito ufficiale prima di campagne massive. "
-                        "Dati OSM © OpenStreetMap contributors."
-                    ),
+                    notes=_directory_note(record),
                     fingerprint=fingerprint,
                 )
             )
@@ -416,14 +504,25 @@ async def _run_job(job_id: str) -> None:
         job.error_message = None
         db.commit()
 
-        urls, osm_records, domain_hints, diagnostics = await _discover(job)
+        urls, directory_records, domain_hints, diagnostics = await _discover(job)
         job.discovered_urls = len(urls)
-        for detail in diagnostics[-80:]:
+        for detail in diagnostics[-150:]:
             db.add(CrawlLog(job_id=job.id, url="", action="discovery", detail=detail))
         db.commit()
 
-        job = _save_osm_contacts(job, osm_records, db)
+        job = _save_directory_contacts(
+            job,
+            directory_records,
+            db,
+            defer_website_only=True,
+        )
         if not urls:
+            job = _save_directory_contacts(
+                job,
+                directory_records,
+                db,
+                defer_website_only=False,
+            )
             if job.contacts_found:
                 job.status = JobStatus.completed.value
                 job.completed_at = datetime.now(timezone.utc)
@@ -433,7 +532,7 @@ async def _run_job(job_id: str) -> None:
             raise RuntimeError(
                 "Nessun sito trovato dai motori disponibili. "
                 f"Diagnostica: {details}. "
-                "Per la massima copertura configura BRAVE_SEARCH_API_KEY oppure usa la raccolta ampia."
+                "Configura GOOGLE_PLACES_API_KEY e BRAVE_SEARCH_API_KEY per la massima copertura."
             )
 
         country_hint = job.countries[0] if len(job.countries or []) == 1 else None
@@ -557,6 +656,12 @@ async def _run_job(job_id: str) -> None:
 
         job = db.get(SearchJob, job_id)
         if job:
+            job = _save_directory_contacts(
+                job,
+                directory_records,
+                db,
+                defer_website_only=False,
+            )
             job.status = JobStatus.completed.value
             job.completed_at = datetime.now(timezone.utc)
             db.commit()

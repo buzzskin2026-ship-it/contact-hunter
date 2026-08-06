@@ -15,8 +15,8 @@ from app.security import require_admin
 from app.services.job_recovery import resume_pending_jobs
 
 APP_RELEASE = "2026.08.06-unbounded-campaign-v8"
-VALIDATION = "pending-ci"
-VALIDATION_RUN = "pending"
+VALIDATION = "lint-32-tests-docker-passed"
+VALIDATION_RUN = "31086632744"
 
 
 @asynccontextmanager

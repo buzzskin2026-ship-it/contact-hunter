@@ -39,13 +39,18 @@ class Settings(BaseSettings):
     common_crawl_urls_per_domain: int = Field(default=10, ge=1, le=50)
     common_crawl_delay_seconds: float = Field(default=0.15, ge=0.0, le=5.0)
 
-    crawler_user_agent: str = "ContactHunter/0.6 (+https://contact-hunter.onrender.com)"
+    crawler_user_agent: str = "ContactHunter/0.7 (+https://contact-hunter.onrender.com)"
     crawler_contact_email: str | None = None
-    crawler_delay_seconds: float = Field(default=1.0, ge=0.2, le=30)
-    crawler_timeout_seconds: float = Field(default=30, ge=5, le=120)
+    crawler_delay_seconds: float = Field(default=0.35, ge=0.2, le=30)
+    crawler_timeout_seconds: float = Field(default=15, ge=5, le=120)
+    crawler_page_timeout_seconds: float = Field(default=12, ge=3, le=90)
+    crawler_domain_timeout_seconds: float = Field(default=45, ge=10, le=300)
+    crawler_sitemap_timeout_seconds: float = Field(default=6, ge=1, le=60)
+    crawler_playwright_timeout_seconds: float = Field(default=12, ge=3, le=90)
+    crawler_quick_pages_per_domain: int = Field(default=6, ge=1, le=20)
     crawler_max_pages_per_domain: int = Field(default=16, ge=1, le=60)
     crawler_max_response_bytes: int = Field(default=20_000_000, ge=100_000, le=50_000_000)
-    crawler_concurrency: int = Field(default=5, ge=1, le=24)
+    crawler_concurrency: int = Field(default=8, ge=1, le=24)
     sitemap_enabled: bool = True
     sitemap_max_urls_per_domain: int = Field(default=25, ge=0, le=200)
     pdf_enabled: bool = True

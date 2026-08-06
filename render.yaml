@@ -25,24 +25,20 @@ services:
           property: connectionString
       - key: BRAVE_SEARCH_API_KEY
         sync: false
-      - key: GOOGLE_PLACES_API_KEY
-        sync: false
-      - key: GOOGLE_PLACES_ENABLED
-        value: "true"
-      - key: GOOGLE_PLACES_MAX_QUERIES
-        value: "700"
-      - key: GOOGLE_PLACES_MAX_PAGES_PER_QUERY
-        value: "3"
-      - key: GOOGLE_PLACES_MAX_PLACES
-        value: "20000"
-      - key: GOOGLE_PLACES_CONCURRENCY
-        value: "5"
-      - key: GOOGLE_PLACES_DELAY_SECONDS
-        value: "0.15"
       - key: OSM_MAX_RECORDS_PER_COUNTRY
         value: "5000"
       - key: OSM_TIMEOUT_SECONDS
         value: "120"
+      - key: OPEN_DATA_ENABLED
+        value: "true"
+      - key: OPEN_DATA_MAX_QUERIES
+        value: "30"
+      - key: OPEN_DATA_DATASETS_PER_QUERY
+        value: "100"
+      - key: OPEN_DATA_MAX_RESOURCES
+        value: "1000"
+      - key: OPEN_DATA_DELAY_SECONDS
+        value: "0.1"
       - key: SEARCH_RESULT_LIMIT
         value: "160"
       - key: PUBLIC_SEARCH_FALLBACK_ENABLED
@@ -54,7 +50,7 @@ services:
       - key: COMMON_CRAWL_ENABLED
         value: "true"
       - key: COMMON_CRAWL_MAX_DOMAINS
-        value: "200"
+        value: "300"
       - key: COMMON_CRAWL_URLS_PER_DOMAIN
         value: "10"
       - key: COMMON_CRAWL_DELAY_SECONDS
@@ -68,7 +64,7 @@ services:
       - key: CRAWLER_MAX_PAGES_PER_DOMAIN
         value: "16"
       - key: CRAWLER_MAX_RESPONSE_BYTES
-        value: "12000000"
+        value: "20000000"
       - key: CRAWLER_CONCURRENCY
         value: "3"
       - key: SITEMAP_ENABLED
@@ -79,6 +75,10 @@ services:
         value: "true"
       - key: PDF_MAX_PAGES
         value: "100"
+      - key: STRUCTURED_DOCUMENTS_ENABLED
+        value: "true"
+      - key: STRUCTURED_DOCUMENT_MAX_ROWS
+        value: "100000"
       - key: RESPECT_ROBOTS_TXT
         value: "true"
       - key: PLAYWRIGHT_ENABLED

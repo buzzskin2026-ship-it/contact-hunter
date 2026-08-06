@@ -17,8 +17,8 @@ from app.services.fast_crawler import FastContactCrawler
 from app.services.job_recovery import resume_pending_jobs
 
 APP_RELEASE = "2026.08.06-quick-crawl-v7"
-VALIDATION = "pending-ci"
-VALIDATION_RUN = "pending"
+VALIDATION = "lint-tests-docker-passed"
+VALIDATION_RUN = "31084164413"
 
 
 @asynccontextmanager

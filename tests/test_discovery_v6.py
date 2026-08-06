@@ -11,7 +11,7 @@ from app.services.jobs import _select_urls
 from app.services.search_open_data import EuropeanOpenDataProvider
 
 
-def test_url_selection_keeps_multiple_public_documents_per_domain():
+def test_url_selection_keeps_multiple_documents_and_drops_redundant_pages():
     urls = [
         "https://ordine.example/albo-roma.pdf",
         "https://ordine.example/albo-milano.pdf",
@@ -24,7 +24,8 @@ def test_url_selection_keeps_multiple_public_documents_per_domain():
     assert "https://ordine.example/albo-roma.pdf" in selected
     assert "https://ordine.example/albo-milano.pdf" in selected
     assert "https://ordine.example/albo-napoli.xlsx" in selected
-    assert len([url for url in selected if "/pagina-" in url]) == 2
+    assert len([url for url in selected if "/pagina-" in url]) == 0
+    assert len(selected) == 3
 
 
 def test_open_data_dataset_parser_accepts_supported_distributions_only():

@@ -6,11 +6,11 @@
   <span id="job-status" class="status large {{ job.status }}">{{ job.status }}</span>
 </section>
 {% if not job.official_sources_only %}
-<div class="notice"><strong>Modalità raccolta ampia:</strong> include contatti professionali pubblici da siti ufficiali e fonti strutturate pubbliche, sempre con fonte e livello di affidabilità.</div>
+<div class="notice"><strong>Modalità segugio attiva:</strong> attività pubbliche, Google Places API, OpenStreetMap, motori web, sitemap, PDF e siti ufficiali. Le piste con solo telefono vengono elaborate dopo la ricerca delle email.</div>
 {% endif %}
 <section class="metrics compact">
-  <article><span>URL scoperti</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
-  <article><span>Pagine analizzate</span><strong id="crawled-pages">{{ job.crawled_pages }}</strong></article>
+  <article><span>URL da analizzare</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
+  <article><span>Pagine e documenti</span><strong id="crawled-pages">{{ job.crawled_pages }}</strong></article>
   <article><span>Contatti trovati</span><strong id="contacts-found">{{ job.contacts_found }}</strong></article>
   <article><span>Duplicati</span><strong id="duplicates-skipped">{{ job.duplicates_skipped }}</strong></article>
 </section>
@@ -20,7 +20,7 @@
   <form action="/searches/{{ job.id }}/retry" method="post"><button class="button secondary" type="submit">Ripeti stessa modalità</button></form>
   {% endif %}
   {% if job.status in ['failed', 'completed'] and job.official_sources_only %}
-  <form action="/searches/{{ job.id }}/broad-retry" method="post"><button class="button primary" type="submit">Raccolta ampia · fino a 500</button></form>
+  <form action="/searches/{{ job.id }}/broad-retry" method="post"><button class="button primary" type="submit">Censimento segugio · fino a 50.000</button></form>
   {% endif %}
   <a class="button secondary" href="/exports/xlsx?job_id={{ job.id }}">Esporta Excel</a>
   <a class="button ghost" href="/exports/csv?job_id={{ job.id }}">Esporta CSV</a>
@@ -45,5 +45,5 @@
     </table>
   </div>
 </section>
-<details class="panel logs"><summary>Log tecnico ({{ logs|length }})</summary><div class="log-list">{% for log in logs %}<div><span>{{ log.action }}</span><code>{{ log.url }}</code><small>{{ log.detail or '' }}</small></div>{% endfor %}</div></details>
+<details class="panel logs" open><summary>Diagnostica fonti e crawler ({{ logs|length }})</summary><div class="log-list">{% for log in logs %}<div><span>{{ log.action }}</span><code>{{ log.url }}</code><small>{{ log.detail or '' }}</small></div>{% endfor %}</div></details>
 {% endblock %}

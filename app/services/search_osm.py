@@ -98,6 +98,8 @@ class OsmContactRecord:
     website: str | None
     emails: list[str]
     phones: list[str]
+    source_type: str = "openstreetmap"
+    external_id: str | None = None
 
 
 def _fold(value: str) -> str:
@@ -146,47 +148,46 @@ def _address(tags: dict[str, str]) -> str | None:
 
 
 class OpenStreetMapDentalProvider:
-    """Discover named dental practices and dental laboratories.
-
-    Records are discovery hints. Contact Hunter labels OSM-derived contacts separately
-    from contacts verified on an official website.
-    """
+    """Discover named dental practices and laboratories from public OSM data."""
 
     endpoints = (
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.nchc.org.tw/api/interpreter",
     )
 
     def __init__(self, settings: Settings) -> None:
-        self.timeout = max(settings.crawler_timeout_seconds, 45)
+        self.timeout = max(settings.osm_timeout_seconds, settings.crawler_timeout_seconds)
         self.user_agent = settings.crawler_user_agent
+        self.max_records_per_country = settings.osm_max_records_per_country
 
     def configured_for(self, sector: str, countries: list[str]) -> bool:
         return supports_dental_sector(sector) and any(country_code(country) for country in countries)
 
     @staticmethod
-    def _query(code: str, limit: int) -> str:
-        # Do not require an existing website/email tag: named records without contacts
-        # are useful because the exact business name can be resolved through a web index.
-        return f'''[out:json][timeout:45];
+    def _query(code: str, limit: int, timeout: int = 120) -> str:
+        return f'''[out:json][timeout:{timeout}];
 area["ISO3166-1"="{code}"]->.searchArea;
 (
   nwr["amenity"="dentist"]["name"](area.searchArea);
   nwr["healthcare"="dentist"]["name"](area.searchArea);
   nwr["craft"="dental_technician"]["name"](area.searchArea);
+  nwr["amenity"="clinic"]["healthcare:speciality"~"dent|odont|stomat",i]["name"](area.searchArea);
+  nwr["healthcare:speciality"~"dent|odont|stomat",i]["name"](area.searchArea);
 );
 out tags center {limit};'''
 
     async def search_country(
         self,
         country: str,
-        limit: int = 180,
+        limit: int | None = None,
     ) -> tuple[list[OsmContactRecord], str]:
         code = country_code(country)
         if not code:
             return [], f"OSM {country}: paese non riconosciuto"
 
-        query = self._query(code, min(max(limit, 30), 300))
+        effective_limit = min(max(limit or self.max_records_per_country, 100), self.max_records_per_country)
+        query = self._query(code, effective_limit, timeout=int(self.timeout))
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
@@ -196,7 +197,7 @@ out tags center {limit};'''
         for endpoint in self.endpoints:
             try:
                 async with httpx.AsyncClient(
-                    timeout=self.timeout,
+                    timeout=self.timeout + 15,
                     follow_redirects=True,
                     headers=headers,
                 ) as client:
@@ -262,12 +263,13 @@ out tags center {limit};'''
                     website=website,
                     emails=emails,
                     phones=phones,
+                    external_id=f"{element_type}/{element_id}",
                 )
             )
 
         await asyncio.sleep(0.4)
         with_contacts = sum(bool(record.website or record.emails or record.phones) for record in records)
         return records, (
-            f"OSM {country}: {len(records)} strutture nominate, "
+            f"OSM {country}: {len(records)} strutture nominate su limite {effective_limit}, "
             f"{with_contacts} con sito/email/telefono"
         )

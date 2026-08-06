@@ -9,6 +9,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import Settings
+from app.services.geo_partitions import discovery_locations
 from app.services.normalizer import canonical_url
 
 
@@ -178,23 +179,28 @@ def _is_dental(sector: str) -> bool:
 
 
 def build_queries(sector: str, countries: list[str], cities: list[str], keywords: list[str]) -> list[str]:
-    locations = cities or countries or [""]
     extra = " ".join(keywords[:5])
     dental = _is_dental(sector)
 
     bases: list[str] = []
-    for location in locations:
-        local_sector = LOCAL_DENTAL_TERMS.get(_fold(location), sector) if dental else sector
-        bases.append(" ".join(part for part in (local_sector, location, extra) if part).strip())
+    for country, location in discovery_locations(countries, cities):
+        local_sector = LOCAL_DENTAL_TERMS.get(_fold(country), sector) if dental else sector
+        parts = [local_sector, location]
+        if country and _fold(country) not in _fold(location):
+            parts.append(country)
+        if extra:
+            parts.append(extra)
+        bases.append(" ".join(part for part in parts if part).strip())
 
-    # Query types are interleaved by country so that a finite quota covers every
-    # requested market before adding deeper variations.
     suffixes = (
         "contact email official website",
         "contatti email sito ufficiale",
-        "telefono email",
-        "filetype:pdf email telefono elenco",
-        "associazione ordine albo directory contatti email",
+        "telefono email reception segreteria",
+        "filetype:pdf email telefono elenco dentisti",
+        "filetype:pdf albo odontoiatri contatti",
+        "associazione dentisti elenco soci contatti email",
+        "ordine medici albo odontoiatri elenco pdf",
+        "directory cliniche studi dentistici email",
         "sedi locations reception segreteria email",
     )
     queries: list[str] = []

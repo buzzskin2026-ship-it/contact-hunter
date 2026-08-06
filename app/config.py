@@ -18,28 +18,40 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
 
     database_url: str = "sqlite:///./data/contact_hunter.db"
+
     brave_search_api_key: str | None = None
-    search_result_limit: int = Field(default=120, ge=1, le=300)
+    search_result_limit: int = Field(default=160, ge=1, le=500)
     public_search_fallback_enabled: bool = True
-    public_search_max_queries: int = Field(default=40, ge=1, le=80)
+    public_search_max_queries: int = Field(default=100, ge=1, le=500)
     public_search_delay_seconds: float = Field(default=0.8, ge=0.0, le=10.0)
 
+    open_data_enabled: bool = True
+    open_data_max_queries: int = Field(default=30, ge=1, le=100)
+    open_data_datasets_per_query: int = Field(default=100, ge=1, le=1_000)
+    open_data_max_resources: int = Field(default=1_000, ge=1, le=10_000)
+    open_data_delay_seconds: float = Field(default=0.1, ge=0.0, le=5.0)
+
+    osm_max_records_per_country: int = Field(default=5_000, ge=100, le=50_000)
+    osm_timeout_seconds: float = Field(default=120, ge=30, le=300)
+
     common_crawl_enabled: bool = True
-    common_crawl_max_domains: int = Field(default=80, ge=0, le=300)
-    common_crawl_urls_per_domain: int = Field(default=8, ge=1, le=30)
+    common_crawl_max_domains: int = Field(default=300, ge=0, le=2_000)
+    common_crawl_urls_per_domain: int = Field(default=10, ge=1, le=50)
     common_crawl_delay_seconds: float = Field(default=0.15, ge=0.0, le=5.0)
 
-    crawler_user_agent: str = "ContactHunter/0.5 (+https://contact-hunter.onrender.com)"
+    crawler_user_agent: str = "ContactHunter/0.6 (+https://contact-hunter.onrender.com)"
     crawler_contact_email: str | None = None
     crawler_delay_seconds: float = Field(default=1.0, ge=0.2, le=30)
     crawler_timeout_seconds: float = Field(default=30, ge=5, le=120)
-    crawler_max_pages_per_domain: int = Field(default=12, ge=1, le=40)
-    crawler_max_response_bytes: int = Field(default=8_000_000, ge=100_000, le=20_000_000)
-    crawler_concurrency: int = Field(default=5, ge=1, le=16)
+    crawler_max_pages_per_domain: int = Field(default=16, ge=1, le=60)
+    crawler_max_response_bytes: int = Field(default=20_000_000, ge=100_000, le=50_000_000)
+    crawler_concurrency: int = Field(default=5, ge=1, le=24)
     sitemap_enabled: bool = True
-    sitemap_max_urls_per_domain: int = Field(default=18, ge=0, le=100)
+    sitemap_max_urls_per_domain: int = Field(default=25, ge=0, le=200)
     pdf_enabled: bool = True
-    pdf_max_pages: int = Field(default=40, ge=1, le=200)
+    pdf_max_pages: int = Field(default=100, ge=1, le=500)
+    structured_documents_enabled: bool = True
+    structured_document_max_rows: int = Field(default=100_000, ge=100, le=1_000_000)
     respect_robots_txt: bool = True
     playwright_enabled: bool = True
     keep_page_snapshots: bool = False

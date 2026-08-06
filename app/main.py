@@ -12,10 +12,11 @@ from app.api.routes import router
 from app.config import get_settings
 from app.db import init_db
 from app.security import require_admin
+from app.services.job_recovery import resume_pending_jobs
 
-APP_RELEASE = "2026.08.05-aggressive-v5"
+APP_RELEASE = "2026.08.06-discovery-v6"
 VALIDATION = "lint-tests-docker-passed"
-VALIDATION_RUN = "31048787640"
+VALIDATION_RUN = "31080041964"
 
 
 @asynccontextmanager
@@ -23,13 +24,14 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.ensure_directories()
     init_db()
+    resume_pending_jobs()
     yield
 
 
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

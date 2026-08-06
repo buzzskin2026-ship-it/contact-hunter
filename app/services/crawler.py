@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import html as html_lib
 import io
+import json
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -11,6 +13,7 @@ from urllib.parse import urljoin
 from xml.etree import ElementTree
 
 import httpx
+from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from app.config import Settings
@@ -18,7 +21,7 @@ from app.services.extractor import ExtractedPage, extract_page
 from app.services.normalizer import canonical_url, domain_of, is_same_or_subdomain, root_url, url_is_allowed
 from app.services.robots import RobotsCache
 
-
+_DOCUMENT_EXTENSIONS = (".pdf", ".csv", ".tsv", ".xlsx", ".json", ".xml")
 _CONTACT_PATHS = (
     "contact",
     "contacts",
@@ -56,6 +59,10 @@ _CONTACT_HINTS = (
     "clinic",
     "office",
     "email",
+    "albo",
+    "elenco",
+    "directory",
+    "dataset",
 )
 
 
@@ -104,7 +111,11 @@ class ContactCrawler:
         self.settings = settings
         headers = {
             "User-Agent": settings.crawler_user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/pdf,application/xml,text/xml;q=0.9,*/*;q=0.5",
+            "Accept": (
+                "text/html,application/xhtml+xml,application/pdf,text/csv,application/json,"
+                "application/xml,text/xml,application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet;q=0.9,*/*;q=0.5"
+            ),
             "Accept-Language": "en,it;q=0.8,*;q=0.5",
         }
         self.client = httpx.AsyncClient(
@@ -150,6 +161,10 @@ class ContactCrawler:
             return current, response, None
         return current, None, "troppi redirect"
 
+    @staticmethod
+    def _html_pre(text: str) -> str:
+        return f"<html><body><pre>{html_lib.escape(text)}</pre></body></html>"
+
     def _pdf_to_html(self, content: bytes) -> str | None:
         if not self.settings.pdf_enabled:
             return None
@@ -161,10 +176,82 @@ class ContactCrawler:
                 if value.strip():
                     texts.append(value)
             text = "\n".join(texts).strip()
-            if not text:
-                return None
-            return f"<html><body><pre>{html_lib.escape(text)}</pre></body></html>"
+            return self._html_pre(text) if text else None
         except Exception:
+            return None
+
+    @staticmethod
+    def _decode_text(content: bytes) -> str:
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                return content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return content.decode("utf-8", errors="replace")
+
+    def _csv_to_html(self, content: bytes, delimiter: str | None = None) -> str | None:
+        if not self.settings.structured_documents_enabled:
+            return None
+        text = self._decode_text(content)
+        sample = text[:20_000]
+        if delimiter is None:
+            try:
+                delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+            except csv.Error:
+                delimiter = ";"
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+        lines: list[str] = []
+        for index, row in enumerate(reader):
+            if index >= self.settings.structured_document_max_rows:
+                break
+            values = [" ".join(str(value).split()) for value in row if str(value).strip()]
+            if values:
+                lines.append(" | ".join(values))
+        flattened = "\n".join(lines).strip()
+        return self._html_pre(flattened) if flattened else None
+
+    def _xlsx_to_html(self, content: bytes) -> str | None:
+        if not self.settings.structured_documents_enabled:
+            return None
+        try:
+            workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            lines: list[str] = []
+            rows_seen = 0
+            for sheet in workbook.worksheets:
+                lines.append(f"FOGLIO: {sheet.title}")
+                for row in sheet.iter_rows(values_only=True):
+                    if rows_seen >= self.settings.structured_document_max_rows:
+                        break
+                    values = [" ".join(str(value).split()) for value in row if value not in (None, "")]
+                    if values:
+                        lines.append(" | ".join(values))
+                    rows_seen += 1
+                if rows_seen >= self.settings.structured_document_max_rows:
+                    break
+            workbook.close()
+            flattened = "\n".join(lines).strip()
+            return self._html_pre(flattened) if flattened else None
+        except Exception:
+            return None
+
+    def _json_to_html(self, content: bytes) -> str | None:
+        if not self.settings.structured_documents_enabled:
+            return None
+        try:
+            payload = json.loads(self._decode_text(content))
+            text = json.dumps(payload, ensure_ascii=False, indent=1)
+            return self._html_pre(text[:8_000_000])
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def _xml_to_html(self, content: bytes) -> str | None:
+        if not self.settings.structured_documents_enabled:
+            return None
+        try:
+            root = ElementTree.fromstring(content)
+            text = "\n".join(value.strip() for value in root.itertext() if value.strip())
+            return self._html_pre(text[:8_000_000]) if text else None
+        except ElementTree.ParseError:
             return None
 
     async def _fetch_http(self, url: str) -> PageResult:
@@ -184,11 +271,34 @@ class ContactCrawler:
             return PageResult(current, response.status_code, None, "ignored", "risorsa oltre il limite di dimensione")
         content_type = response.headers.get("content-type", "").lower()
         lowered_url = current.casefold().split("?", 1)[0]
+
         if "application/pdf" in content_type or lowered_url.endswith(".pdf"):
             html = await asyncio.to_thread(self._pdf_to_html, content)
             if html:
                 return PageResult(current, response.status_code, html, "pdf", "PDF pubblico estratto")
             return PageResult(current, response.status_code, None, "ignored", "PDF senza testo estraibile")
+        if "text/csv" in content_type or lowered_url.endswith(".csv"):
+            html = await asyncio.to_thread(self._csv_to_html, content, None)
+            return PageResult(current, response.status_code, html, "csv", "CSV pubblico estratto")
+        if "tab-separated-values" in content_type or lowered_url.endswith(".tsv"):
+            html = await asyncio.to_thread(self._csv_to_html, content, "\t")
+            return PageResult(current, response.status_code, html, "csv", "TSV pubblico estratto")
+        if (
+            "spreadsheetml.sheet" in content_type
+            or lowered_url.endswith(".xlsx")
+        ):
+            html = await asyncio.to_thread(self._xlsx_to_html, content)
+            return PageResult(current, response.status_code, html, "spreadsheet", "XLSX pubblico estratto")
+        if "application/json" in content_type or lowered_url.endswith(".json"):
+            html = await asyncio.to_thread(self._json_to_html, content)
+            return PageResult(current, response.status_code, html, "json", "JSON pubblico estratto")
+        if (
+            "application/xml" in content_type
+            or "text/xml" in content_type
+            or lowered_url.endswith(".xml")
+        ):
+            html = await asyncio.to_thread(self._xml_to_html, content)
+            return PageResult(current, response.status_code, html, "xml", "XML pubblico estratto")
         if (
             "text/html" not in content_type
             and "application/xhtml+xml" not in content_type
@@ -201,7 +311,7 @@ class ContactCrawler:
         except LookupError:
             html = content.decode("utf-8", errors="replace")
         if "text/plain" in content_type:
-            html = f"<html><body><pre>{html_lib.escape(html)}</pre></body></html>"
+            html = self._html_pre(html)
         return PageResult(current, response.status_code, html, "fetched")
 
     async def _fetch_playwright(self, url: str) -> PageResult:
@@ -261,7 +371,7 @@ class ContactCrawler:
 
     async def fetch(self, url: str) -> PageResult:
         result = await self._fetch_http(url)
-        if result.action == "pdf":
+        if result.action in {"pdf", "csv", "spreadsheet", "json", "xml"}:
             return result
         if result.html and len(result.html) >= 1_000:
             return result
@@ -274,7 +384,7 @@ class ContactCrawler:
     def _sitemap_score(url: str) -> tuple[int, int, str]:
         lowered = url.casefold()
         score = sum(20 for hint in _CONTACT_HINTS if hint in lowered)
-        if lowered.split("?", 1)[0].endswith(".pdf"):
+        if lowered.split("?", 1)[0].endswith(_DOCUMENT_EXTENSIONS):
             score += 12
         return (-score, lowered.count("/"), url)
 
@@ -294,13 +404,13 @@ class ContactCrawler:
         discovered: list[str] = []
         sitemap_queue: deque[str] = deque(dict.fromkeys(candidates))
         visited_sitemaps: set[str] = set()
-        while sitemap_queue and len(visited_sitemaps) < 6:
+        while sitemap_queue and len(visited_sitemaps) < 8:
             sitemap_url = sitemap_queue.popleft()
             if sitemap_url in visited_sitemaps:
                 continue
             visited_sitemaps.add(sitemap_url)
             _, response, _ = await self._request(sitemap_url, enforce_robots=False)
-            if not response or response.status_code >= 400 or len(response.content) > 5_000_000:
+            if not response or response.status_code >= 400 or len(response.content) > 8_000_000:
                 continue
             try:
                 root = ElementTree.fromstring(response.content)
@@ -319,10 +429,12 @@ class ContactCrawler:
                 ):
                     continue
                 path = target.casefold().split("?", 1)[0]
-                if path.endswith((".xml", ".xml.gz")):
+                if path.endswith((".xml.gz",)) or (
+                    path.endswith(".xml") and "sitemap" in path
+                ):
                     sitemap_queue.append(target)
                     continue
-                if any(hint in target.casefold() for hint in _CONTACT_HINTS) or path.endswith(".pdf"):
+                if any(hint in target.casefold() for hint in _CONTACT_HINTS) or path.endswith(_DOCUMENT_EXTENSIONS):
                     discovered.append(target)
 
         unique = list(dict.fromkeys(discovered))

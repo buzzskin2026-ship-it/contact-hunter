@@ -60,7 +60,7 @@ def create_search(
     keywords: str = Form(""),
     seed_urls: str = Form(""),
     requested_fields: list[str] = Form(default=["email", "phone"]),
-    max_results: int = Form(100),
+    max_results: int = Form(500),
     official_sources_only: bool = Form(False),
     exclude_free_email_providers: bool = Form(False),
     db: Session = Depends(get_db),
@@ -100,7 +100,7 @@ def search_detail(job_id: str, request: Request, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Ricerca non trovata")
     contacts = list(db.scalars(select(Contact).where(Contact.job_id == job_id).order_by(Contact.id.desc()).limit(500)))
-    logs = list(db.scalars(select(CrawlLog).where(CrawlLog.job_id == job_id).order_by(CrawlLog.id.desc()).limit(150)))
+    logs = list(db.scalars(select(CrawlLog).where(CrawlLog.job_id == job_id).order_by(CrawlLog.id.desc()).limit(250)))
     return templates.TemplateResponse(request, "search_detail.html", {"job": job, "contacts": contacts, "logs": logs})
 
 
@@ -115,7 +115,7 @@ def _clone_search(original: SearchJob, *, broad: bool = False) -> SearchJob:
         keywords=list(original.keywords or []),
         seed_urls=list(original.seed_urls or []),
         requested_fields=fields,
-        max_results=max(original.max_results, 500) if broad else original.max_results,
+        max_results=max(original.max_results, 50_000) if broad else original.max_results,
         official_sources_only=False if broad else original.official_sources_only,
         exclude_free_email_providers=False if broad else original.exclude_free_email_providers,
     )
@@ -226,5 +226,5 @@ def search_api(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/api/contacts", response_model=list[ContactRead], dependencies=[Depends(require_admin)])
-def contacts_api(limit: int = Query(100, ge=1, le=1000), db: Session = Depends(get_db)):
+def contacts_api(limit: int = Query(100, ge=1, le=5000), db: Session = Depends(get_db)):
     return list(db.scalars(select(Contact).order_by(Contact.id.desc()).limit(limit)))

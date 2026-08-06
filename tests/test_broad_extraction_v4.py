@@ -37,7 +37,7 @@ def test_broad_retry_expands_fields_and_limits_without_private_sources():
         exclude_free_email_providers=True,
     )
     broad = _clone_search(original, broad=True)
-    assert broad.max_results == 500
+    assert broad.max_results == 50_000
     assert broad.official_sources_only is False
     assert broad.exclude_free_email_providers is False
     assert {"email", "phone", "whatsapp", "address"}.issubset(broad.requested_fields)

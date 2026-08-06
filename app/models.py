@@ -153,6 +153,8 @@ class CrawlTarget(Base):
         ForeignKey("search_jobs.id", ondelete="CASCADE"),
         index=True,
     )
+    # crawl = fetch a public URL; resolve = search the public web by business name.
+    kind: Mapped[str] = mapped_column(String(20), default="crawl", index=True)
     url: Mapped[str] = mapped_column(Text)
     url_hash: Mapped[str] = mapped_column(String(64))
     domain: Mapped[str] = mapped_column(String(255), index=True)

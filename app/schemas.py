@@ -8,11 +8,11 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 class SearchCreate(BaseModel):
     sector: str = Field(min_length=2, max_length=160)
     countries: list[str] = Field(default_factory=list, max_length=30)
-    cities: list[str] = Field(default_factory=list, max_length=100)
-    keywords: list[str] = Field(default_factory=list, max_length=30)
-    seed_urls: list[HttpUrl] = Field(default_factory=list, max_length=500)
+    cities: list[str] = Field(default_factory=list, max_length=500)
+    keywords: list[str] = Field(default_factory=list, max_length=50)
+    seed_urls: list[HttpUrl] = Field(default_factory=list, max_length=2_000)
     requested_fields: list[str] = Field(default_factory=lambda: ["email", "phone"])
-    max_results: int = Field(default=100, ge=1, le=10_000)
+    max_results: int = Field(default=100, ge=1, le=50_000)
     official_sources_only: bool = True
     exclude_free_email_providers: bool = False
 

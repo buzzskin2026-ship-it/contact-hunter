@@ -12,11 +12,13 @@ from app.api.routes import router
 from app.config import get_settings
 from app.db import init_db
 from app.security import require_admin
+from app.services import jobs as jobs_service
+from app.services.fast_crawler import FastContactCrawler
 from app.services.job_recovery import resume_pending_jobs
 
-APP_RELEASE = "2026.08.06-discovery-v6"
-VALIDATION = "lint-tests-docker-passed"
-VALIDATION_RUN = "31080041964"
+APP_RELEASE = "2026.08.06-quick-crawl-v7"
+VALIDATION = "pending-ci"
+VALIDATION_RUN = "pending"
 
 
 @asynccontextmanager
@@ -24,6 +26,7 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.ensure_directories()
     init_db()
+    jobs_service.ContactCrawler = FastContactCrawler
     resume_pending_jobs()
     yield
 
@@ -31,7 +34,7 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

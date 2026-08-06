@@ -1,4 +1,5 @@
 from app.config import Settings
+from app.services.geo_partitions import discovery_locations
 from app.services.jobs import _distinctive_tokens, _round_robin_records, _usable_business_hit
 from app.services.search import SearchHit, build_queries
 from app.services.search_osm import (
@@ -37,26 +38,33 @@ def test_dental_sector_detection():
     assert not supports_dental_sector("hotel e ristoranti")
 
 
-def test_queries_are_distributed_across_countries_before_deeper_variations():
-    countries = ["Italia", "Francia", "Germania", "Spagna"]
-    queries = build_queries("studi dentistici", countries, [], [])
-    assert len(queries) == 24
-    assert "Italia" in queries[0]
-    assert "Francia" in queries[1]
-    assert "Germania" in queries[2]
-    assert "Spagna" in queries[3]
+def test_italian_national_search_is_partitioned_across_the_country():
+    locations = discovery_locations(["Italia"], [])
+    location_names = {location for _, location in locations}
+    assert len(locations) > 100
+    assert {"Roma", "Milano", "Napoli", "Palermo", "Cagliari"}.issubset(location_names)
+    assert "Gallura Nord-Est Sardegna" in location_names
+    assert "Lombardia" in location_names
+
+
+def test_queries_cover_each_italian_partition_and_document_sources():
+    queries = build_queries("studi dentistici", ["Italia"], [], [])
+    locations = discovery_locations(["Italia"], [])
+    assert len(queries) == len(locations) * 9
+    assert "Agrigento" in queries[0]
     assert "official website" in queries[0]
-    assert "contatti email" in queries[4]
-    assert "filetype:pdf" in queries[12]
-    assert "associazione" in queries[16]
+    assert any("Roma" in query and "filetype:pdf" in query for query in queries)
+    assert any("Milano" in query and "associazione dentisti" in query for query in queries)
+    assert any("albo odontoiatri" in query for query in queries)
 
 
-def test_overpass_query_targets_all_named_dentists_and_labs():
+def test_overpass_query_targets_all_named_dentists_labs_and_specialist_clinics():
     provider = OpenStreetMapDentalProvider(Settings(playwright_enabled=False))
     query = provider._query("IT", 80)
     assert '"amenity"="dentist"' in query
     assert '"healthcare"="dentist"' in query
     assert '"craft"="dental_technician"' in query
+    assert '"healthcare:speciality"' in query
     assert '["name"]' in query
     assert "contact:website" not in query
     assert "out tags center 80;" in query

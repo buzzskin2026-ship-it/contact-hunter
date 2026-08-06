@@ -23,40 +23,48 @@ services:
         fromDatabase:
           name: contact-hunter-db
           property: connectionString
+      - key: CAMPAIGN_QUEUE_BATCH_SIZE
+        value: "100"
+      - key: CAMPAIGN_MAX_ATTEMPTS
+        value: "2"
+      - key: CAMPAIGN_RECOVERY_JOBS
+        value: "25"
+      - key: CAMPAIGN_DISCOVERY_BATCH_SIZE
+        value: "500"
       - key: BRAVE_SEARCH_API_KEY
         sync: false
       - key: OSM_MAX_RECORDS_PER_COUNTRY
-        value: "5000"
+        value: "0"
       - key: OSM_TIMEOUT_SECONDS
-        value: "120"
+        value: "180"
       - key: OPEN_DATA_ENABLED
         value: "true"
       - key: OPEN_DATA_MAX_QUERIES
-        value: "30"
+        value: "0"
       - key: OPEN_DATA_DATASETS_PER_QUERY
-        value: "100"
-      - key: OPEN_DATA_MAX_RESOURCES
         value: "1000"
+      - key: OPEN_DATA_MAX_RESOURCES
+        value: "0"
       - key: OPEN_DATA_DELAY_SECONDS
         value: "0.1"
       - key: SEARCH_RESULT_LIMIT
-        value: "160"
+        value: "500"
       - key: PUBLIC_SEARCH_FALLBACK_ENABLED
         value: "true"
       - key: PUBLIC_SEARCH_MAX_QUERIES
-        value: "100"
+        value: "0"
       - key: PUBLIC_SEARCH_DELAY_SECONDS
         value: "0.8"
       - key: COMMON_CRAWL_ENABLED
         value: "true"
       - key: COMMON_CRAWL_MAX_DOMAINS
-        value: "300"
+        value: "0"
       - key: COMMON_CRAWL_URLS_PER_DOMAIN
-        value: "10"
+        value: "25"
       - key: COMMON_CRAWL_DELAY_SECONDS
         value: "0.15"
       - key: CRAWLER_USER_AGENT
-        value: "ContactHunter/0.7 (+https://contact-hunter.onrender.com)"
+        value: "ContactHunter/0.8 (+https://contact-hunter.onrender.com)"
       - key: CRAWLER_DELAY_SECONDS
         value: "0.35"
       - key: CRAWLER_TIMEOUT_SECONDS

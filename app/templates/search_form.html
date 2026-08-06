@@ -2,16 +2,16 @@
 {% block title %}Nuova ricerca · Contact Hunter{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><span class="eyebrow">NUOVA RICERCA</span><h1>Definisci i contatti da trovare</h1><p>La modalità predefinita raccoglie contatti professionali pubblici da siti ufficiali e fonti strutturate pubbliche.</p></div>
+  <div><span class="eyebrow">NUOVA RICERCA</span><h1>Avvia un censimento di contatti</h1><p>Il motore combina directory pubbliche, Google Places API, indice web, sitemap, PDF e siti ufficiali.</p></div>
 </section>
 <form class="panel search-form" action="/searches" method="post">
   <div class="form-grid">
-    <label class="wide"><span>Settore o tipologia *</span><input name="sector" placeholder="es. studi dentistici, laboratori odontotecnici" required></label>
-    <label><span>Paesi</span><input name="countries" placeholder="Italia, Francia, Germania"></label>
-    <label><span>Città o regioni</span><input name="cities" placeholder="Roma, Lazio, Milano"></label>
+    <label class="wide"><span>Settore o tipologia *</span><input name="sector" value="studi dentistici, cliniche dentali, laboratori odontotecnici" placeholder="es. studi dentistici, laboratori odontotecnici" required></label>
+    <label><span>Paesi</span><input name="countries" value="Italia" placeholder="Italia, Francia, Germania"><small>Per l'Italia la ricerca viene automaticamente divisa per province, città e regioni.</small></label>
+    <label><span>Città, province o regioni</span><input name="cities" placeholder="Lascia vuoto per copertura nazionale"><small>Compila questo campo solo per limitare il censimento a territori specifici.</small></label>
     <label class="wide"><span>Parole chiave / specializzazioni</span><input name="keywords" placeholder="implantologia, ortodonzia, laboratorio CAD/CAM"></label>
-    <label class="wide"><span>URL iniziali, uno per riga</span><textarea name="seed_urls" rows="6" placeholder="https://esempio.it/contatti&#10;https://altra-clinica.eu"></textarea><small>Facoltativi: il sistema usa anche indice web e fonti strutturate pubbliche.</small></label>
-    <label><span>Numero massimo di contatti</span><input type="number" name="max_results" value="500" min="1" max="10000"></label>
+    <label class="wide"><span>URL iniziali, uno per riga</span><textarea name="seed_urls" rows="5" placeholder="https://associazione.example/elenco.pdf&#10;https://ordine.example/albo"></textarea><small>Facoltativi: aggiungi albi, associazioni, PDF o directory pubbliche che conosci.</small></label>
+    <label><span>Numero massimo di contatti</span><input type="number" name="max_results" value="10000" min="1" max="50000"><small>Il censimento massivo può arrivare a 50.000 record.</small></label>
     <fieldset>
       <legend>Dati richiesti</legend>
       <label class="check"><input type="checkbox" name="requested_fields" value="email" checked> Email</label>
@@ -21,11 +21,11 @@
     </fieldset>
     <fieldset class="wide">
       <legend>Qualità e fonti</legend>
-      <label class="check"><input type="checkbox" name="official_sources_only" value="true"> Solo siti ufficiali <small>(qualità più alta, quantità molto più bassa)</small></label>
+      <label class="check"><input type="checkbox" name="official_sources_only" value="true"> Solo siti ufficiali <small>(disattiva Google Places e le directory pubbliche)</small></label>
       <label class="check"><input type="checkbox" name="exclude_free_email_providers" value="true"> Escludi Gmail, Outlook e provider gratuiti</label>
     </fieldset>
   </div>
-  <div class="notice"><strong>Raccolta ampia lecita:</strong> il sistema usa pagine e fonti pubblicamente accessibili, conserva la fonte, deduplica i contatti e non supera login, CAPTCHA o sistemi di sicurezza.</div>
-  <div class="form-actions"><a class="button ghost" href="/">Annulla</a><button class="button primary" type="submit">Avvia raccolta</button></div>
+  <div class="notice"><strong>Modalità segugio:</strong> divide il territorio in centinaia di ricerche, usa le attività pubbliche per trovare i siti, analizza pagine contatti, sitemap e PDF, e salva ogni email pubblica distinta con la relativa fonte.</div>
+  <div class="form-actions"><a class="button ghost" href="/">Annulla</a><button class="button primary" type="submit">Avvia censimento massivo</button></div>
 </form>
 {% endblock %}

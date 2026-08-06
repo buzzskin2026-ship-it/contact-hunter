@@ -6,7 +6,7 @@
   <span id="job-status" class="status large {{ job.status }}">{{ job.status }}</span>
 </section>
 {% if not job.official_sources_only %}
-<div class="notice"><strong>Modalità segugio attiva:</strong> attività pubbliche, Google Places API, OpenStreetMap, motori web, sitemap, PDF e siti ufficiali. Le piste con solo telefono vengono elaborate dopo la ricerca delle email.</div>
+<div class="notice"><strong>Modalità segugio attiva:</strong> OpenStreetMap, open data europei, motori web, Common Crawl, sitemap, PDF, CSV, XLSX, JSON, XML e siti ufficiali. Le piste con solo telefono vengono elaborate dopo la ricerca delle email.</div>
 {% endif %}
 <section class="metrics compact">
   <article><span>URL da analizzare</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>

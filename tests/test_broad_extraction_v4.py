@@ -27,7 +27,7 @@ def test_extracts_obfuscated_cloudflare_and_structured_contacts():
     assert result.phones
 
 
-def test_broad_retry_expands_fields_and_limits_without_private_sources():
+def test_broad_retry_expands_fields_without_a_global_contact_ceiling():
     original = SearchJob(
         sector="studi dentistici",
         countries=["Italia"],
@@ -37,10 +37,12 @@ def test_broad_retry_expands_fields_and_limits_without_private_sources():
         exclude_free_email_providers=True,
     )
     broad = _clone_search(original, broad=True)
-    assert broad.max_results == 50_000
+    assert broad.max_results == 0
     assert broad.official_sources_only is False
     assert broad.exclude_free_email_providers is False
-    assert {"email", "phone", "whatsapp", "address"}.issubset(broad.requested_fields)
+    assert {"email", "phone", "whatsapp", "address"}.issubset(
+        broad.requested_fields
+    )
 
 
 def test_broad_mode_creates_one_export_record_per_unique_email():

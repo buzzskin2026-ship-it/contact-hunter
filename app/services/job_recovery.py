@@ -2,26 +2,35 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db import SessionLocal
 from app.models import JobStatus, SearchJob
-from app.services.jobs import submit_job
+from app.services.campaign_engine import submit_job
 
 
-def resume_pending_jobs(limit: int = 5) -> int:
-    """Requeue jobs left incomplete by a process restart.
+def resume_pending_jobs(limit: int | None = None) -> int:
+    """Requeue incomplete campaigns after a process restart.
 
-    The application currently runs one web instance, so startup is the safe point
-    to recover queued/running campaigns. Database uniqueness keeps repeated
-    contacts from being inserted if discovery has to start again.
+    Crawl targets are stored in PostgreSQL, so the campaign engine resumes queued
+    work instead of rebuilding one giant in-memory task list.
     """
+    settings = get_settings()
+    effective_limit = limit or settings.campaign_recovery_jobs
     db = SessionLocal()
     try:
         jobs = list(
             db.scalars(
                 select(SearchJob)
-                .where(SearchJob.status.in_((JobStatus.queued.value, JobStatus.running.value)))
+                .where(
+                    SearchJob.status.in_(
+                        (
+                            JobStatus.queued.value,
+                            JobStatus.running.value,
+                        )
+                    )
+                )
                 .order_by(SearchJob.created_at)
-                .limit(limit)
+                .limit(effective_limit)
             )
         )
         ids = [job.id for job in jobs]

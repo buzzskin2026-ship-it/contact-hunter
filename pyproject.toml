@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contact-hunter"
-version = "0.6.0"
-description = "Motore discovery-first per censire, verificare e deduplicare contatti B2B pubblici da web e open data."
+version = "0.8.0"
+description = "Motore persistente per censire, verificare e deduplicare contatti B2B pubblici da web e open data."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -50,3 +50,8 @@ select = ["E", "F", "I", "UP", "B"]
 # The remaining ignores cover pre-existing formatting/modernization warnings;
 # correctness errors (E/F and the rest of B) remain blocking in CI.
 ignore = ["E501", "B008", "I001", "UP012", "UP017", "UP037", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# The nested coroutine is created and awaited inside the same queue iteration;
+# the SearchJob object cannot advance to a later loop iteration before gather ends.
+"app/services/campaign_engine.py" = ["B023"]

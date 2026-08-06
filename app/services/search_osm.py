@@ -104,7 +104,9 @@ class OsmContactRecord:
 
 def _fold(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
-    return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
+    return "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    ).strip().lower()
 
 
 def country_code(value: str) -> str | None:
@@ -138,10 +140,14 @@ def _website(tags: dict[str, str]) -> str | None:
 
 def _address(tags: dict[str, str]) -> str | None:
     street = " ".join(
-        part for part in (tags.get("addr:street"), tags.get("addr:housenumber")) if part
+        part
+        for part in (tags.get("addr:street"), tags.get("addr:housenumber"))
+        if part
     ).strip()
     locality = " ".join(
-        part for part in (tags.get("addr:postcode"), tags.get("addr:city")) if part
+        part
+        for part in (tags.get("addr:postcode"), tags.get("addr:city"))
+        if part
     ).strip()
     parts = [part for part in (street, locality) if part]
     return ", ".join(parts) or None
@@ -157,15 +163,21 @@ class OpenStreetMapDentalProvider:
     )
 
     def __init__(self, settings: Settings) -> None:
-        self.timeout = max(settings.osm_timeout_seconds, settings.crawler_timeout_seconds)
+        self.timeout = max(
+            settings.osm_timeout_seconds,
+            settings.crawler_timeout_seconds,
+        )
         self.user_agent = settings.crawler_user_agent
         self.max_records_per_country = settings.osm_max_records_per_country
 
     def configured_for(self, sector: str, countries: list[str]) -> bool:
-        return supports_dental_sector(sector) and any(country_code(country) for country in countries)
+        return supports_dental_sector(sector) and any(
+            country_code(country) for country in countries
+        )
 
     @staticmethod
-    def _query(code: str, limit: int, timeout: int = 120) -> str:
+    def _query(code: str, limit: int | None, timeout: int = 120) -> str:
+        output_limit = f" {limit}" if limit and limit > 0 else ""
         return f'''[out:json][timeout:{timeout}];
 area["ISO3166-1"="{code}"]->.searchArea;
 (
@@ -175,7 +187,7 @@ area["ISO3166-1"="{code}"]->.searchArea;
   nwr["amenity"="clinic"]["healthcare:speciality"~"dent|odont|stomat",i]["name"](area.searchArea);
   nwr["healthcare:speciality"~"dent|odont|stomat",i]["name"](area.searchArea);
 );
-out tags center {limit};'''
+out tags center{output_limit};'''
 
     async def search_country(
         self,
@@ -186,7 +198,8 @@ out tags center {limit};'''
         if not code:
             return [], f"OSM {country}: paese non riconosciuto"
 
-        effective_limit = min(max(limit or self.max_records_per_country, 100), self.max_records_per_country)
+        requested = self.max_records_per_country if limit is None else limit
+        effective_limit = requested if requested and requested > 0 else None
         query = self._query(code, effective_limit, timeout=int(self.timeout))
         headers = {
             "User-Agent": self.user_agent,
@@ -230,7 +243,9 @@ out tags center {limit};'''
 
             element_type = str(element.get("type", "node"))
             element_id = str(element.get("id", ""))
-            source_url = f"https://www.openstreetmap.org/{element_type}/{element_id}"
+            source_url = (
+                f"https://www.openstreetmap.org/{element_type}/{element_id}"
+            )
             organization = (
                 tags.get("name")
                 or tags.get("operator")
@@ -242,7 +257,11 @@ out tags center {limit};'''
                 if tags.get("craft") == "dental_technician"
                 else "Studio dentistico / clinica dentale"
             )
-            city = tags.get("addr:city") or tags.get("addr:place") or tags.get("is_in:city")
+            city = (
+                tags.get("addr:city")
+                or tags.get("addr:place")
+                or tags.get("is_in:city")
+            )
             address = _address(tags)
             key = (
                 organization.casefold(),
@@ -268,8 +287,12 @@ out tags center {limit};'''
             )
 
         await asyncio.sleep(0.4)
-        with_contacts = sum(bool(record.website or record.emails or record.phones) for record in records)
+        with_contacts = sum(
+            bool(record.website or record.emails or record.phones)
+            for record in records
+        )
+        limit_label = str(effective_limit) if effective_limit else "nessun tetto software"
         return records, (
-            f"OSM {country}: {len(records)} strutture nominate su limite {effective_limit}, "
+            f"OSM {country}: {len(records)} strutture nominate su {limit_label}, "
             f"{with_contacts} con sito/email/telefono"
         )

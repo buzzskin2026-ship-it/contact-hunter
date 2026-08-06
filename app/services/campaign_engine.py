@@ -5,7 +5,6 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -30,12 +29,15 @@ from app.services.normalizer import (
     domain_of,
     is_free_email,
 )
-from app.services.search import BraveSearchProvider, PublicSearchProvider, SearchHit, build_queries
+from app.services.search import BraveSearchProvider, PublicSearchProvider, build_queries
 from app.services.search_bing import BingRssSearchProvider
 from app.services.search_open_data import EuropeanOpenDataProvider
 from app.services.search_osm import OpenStreetMapDentalProvider, OsmContactRecord
 
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-campaign")
+_executor = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="contact-hunter-campaign",
+)
 
 
 @dataclass(frozen=True)
@@ -362,20 +364,22 @@ async def _discover_campaign(
         list(job.cities or []),
         list(job.keywords or []),
     )
-    query_limit = (
-        len(queries)
-        if settings.public_search_max_queries == 0
-        else min(len(queries), settings.public_search_max_queries)
-    )
-    urls = await legacy._discover_web_urls(
-        queries,
-        brave,
-        bing,
-        public,
-        diagnostics,
-        limit=query_limit,
-    )
-    for url in urls:
+    if settings.public_search_max_queries > 0:
+        queries = queries[: settings.public_search_max_queries]
+
+    web_urls: list[str] = []
+    for query_batch in _chunks(queries, settings.campaign_discovery_batch_size):
+        web_urls.extend(
+            await legacy._discover_web_urls(
+                query_batch,
+                brave,
+                bing,
+                public,
+                diagnostics,
+                limit=len(query_batch),
+            )
+        )
+    for url in web_urls:
         spec = _crawl_spec(url)
         if spec:
             specs.append(spec)
@@ -388,17 +392,14 @@ async def _discover_campaign(
 
 async def _resolve_business(
     target: CrawlTarget,
-    settings: Settings,
+    brave: BraveSearchProvider,
+    bing: BingRssSearchProvider,
+    public: PublicSearchProvider,
 ) -> TargetOutcome:
     record = _hint_record(target.hint or {})
-    location = " ".join(
-        part for part in (record.city, record.country) if part
-    )
+    location = " ".join(part for part in (record.city, record.country) if part)
     query = f'"{record.organization}" {location} sito ufficiale contatti email'
     diagnostics: list[str] = []
-    brave = BraveSearchProvider(settings)
-    bing = BingRssSearchProvider(settings)
-    public = PublicSearchProvider(settings)
     try:
         hits = await legacy._provider_hits(
             query,
@@ -430,11 +431,10 @@ async def _resolve_business(
 
 async def _expand_common_crawl(
     target: CrawlTarget,
-    settings: Settings,
+    provider: CommonCrawlUrlProvider,
 ) -> tuple[list[TargetSpec], str | None]:
-    if not settings.common_crawl_enabled or not target.domain:
+    if not provider.configured or not target.domain:
         return [], None
-    provider = CommonCrawlUrlProvider(settings)
     try:
         urls, detail = await provider.discover(target.domain)
     except Exception as exc:
@@ -450,7 +450,8 @@ async def _expand_common_crawl(
 async def _crawl_target(
     target: CrawlTarget,
     crawler: FastContactCrawler,
-    settings: Settings,
+    common_crawl: CommonCrawlUrlProvider,
+    keywords: list[str],
     *,
     expand_common_crawl: bool,
 ) -> TargetOutcome:
@@ -459,11 +460,14 @@ async def _crawl_target(
         common_specs: list[TargetSpec] = []
         common_detail: str | None = None
         if expand_common_crawl:
-            common_specs, common_detail = await _expand_common_crawl(target, settings)
+            common_specs, common_detail = await _expand_common_crawl(
+                target,
+                common_crawl,
+            )
         candidate = await crawler.crawl_domain(
             target.url,
             country=hint.get("country"),
-            keywords=[],
+            keywords=keywords,
         )
         logs = list(candidate.logs)
         if common_detail:
@@ -596,6 +600,11 @@ async def _process_queue(
 ) -> None:
     db = SessionLocal()
     crawler = FastContactCrawler(settings)
+    common_crawl = CommonCrawlUrlProvider(settings)
+    brave = BraveSearchProvider(settings)
+    bing = BingRssSearchProvider(settings)
+    public = PublicSearchProvider(settings)
+    semaphore = asyncio.Semaphore(settings.crawler_concurrency)
     try:
         _reset_interrupted_targets(db, job_id)
         while True:
@@ -606,20 +615,24 @@ async def _process_queue(
             if not batch:
                 break
 
-            tasks = []
-            for target in batch:
-                if target.kind == "resolve":
-                    tasks.append(_resolve_business(target, settings))
-                else:
-                    tasks.append(
-                        _crawl_target(
+            async def run_target(target: CrawlTarget) -> TargetOutcome:
+                async with semaphore:
+                    if target.kind == "resolve":
+                        return await _resolve_business(
                             target,
-                            crawler,
-                            settings,
-                            expand_common_crawl=_first_domain_target(db, target),
+                            brave,
+                            bing,
+                            public,
                         )
+                    return await _crawl_target(
+                        target,
+                        crawler,
+                        common_crawl,
+                        list(job.keywords or []),
+                        expand_common_crawl=_first_domain_target(db, target),
                     )
-            outcomes = await asyncio.gather(*tasks)
+
+            outcomes = await asyncio.gather(*(run_target(target) for target in batch))
 
             for outcome in outcomes:
                 target = db.get(CrawlTarget, outcome.target_id)

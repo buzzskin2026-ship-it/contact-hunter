@@ -24,7 +24,7 @@ from app.services.normalizer import (
 )
 from app.services.search import BraveSearchProvider, PublicSearchProvider, SearchHit, build_queries
 from app.services.search_bing import BingRssSearchProvider
-from app.services.search_google_places import GooglePlacesProvider
+from app.services.search_open_data import EuropeanOpenDataProvider
 from app.services.search_osm import OpenStreetMapDentalProvider, OsmContactRecord
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="contact-hunter-job")
@@ -45,6 +45,7 @@ _DISCOVERY_BLOCKLIST = {
     "yelp.com",
     "tripadvisor.com",
 }
+_DOCUMENT_EXTENSIONS = (".pdf", ".csv", ".tsv", ".xlsx", ".xls", ".json", ".xml")
 _GENERIC_TOKENS = {
     "dental",
     "dentist",
@@ -105,7 +106,7 @@ def _usable_business_hit(hit: SearchHit, record: OsmContactRecord) -> bool:
     host = domain_of(hit.url).removeprefix("www.")
     if not host or any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
         return False
-    if hit.url.lower().endswith((".doc", ".docx", ".xls", ".xlsx")):
+    if hit.url.lower().endswith((".doc", ".docx")):
         return False
     tokens = _distinctive_tokens(record.organization)
     if not tokens:
@@ -227,14 +228,13 @@ async def _expand_with_common_crawl(
     expanded: list[str] = []
     replaced = 0
     attempted = 0
+    attempted_hosts: set[str] = set()
     for original in urls:
-        if attempted >= settings.common_crawl_max_domains:
-            expanded.append(original)
-            continue
         host = domain_of(original).removeprefix("www.")
-        if not host:
+        if not host or host in attempted_hosts or attempted >= settings.common_crawl_max_domains:
             expanded.append(original)
             continue
+        attempted_hosts.add(host)
         attempted += 1
         try:
             archived_urls, _ = await provider.discover(host)
@@ -245,13 +245,14 @@ async def _expand_with_common_crawl(
             continue
         if archived_urls:
             expanded.append(archived_urls[0].url)
+            expanded.append(original)
             replaced += 1
         else:
             expanded.append(original)
     diagnostics.append(
-        f"Common Crawl: {replaced} domini avviati da una pagina contatti/PDF su {attempted} interrogati"
+        f"Common Crawl: {replaced} domini arricchiti su {attempted} interrogati"
     )
-    return expanded
+    return list(dict.fromkeys(expanded))
 
 
 async def _discover_web_urls(
@@ -286,6 +287,34 @@ async def _discover_web_urls(
         urls.extend(hit.url for hit in result)
     diagnostics.append(f"Ricerca web/PDF: {successful} query completate su {len(selected)}")
     return urls
+
+
+def _select_urls(urls: list[str], max_urls: int) -> list[str]:
+    unique: list[str] = []
+    seen_urls: set[str] = set()
+    domain_counts: defaultdict[str, int] = defaultdict(int)
+
+    for raw in urls:
+        url = canonical_url(raw)
+        if not url or url in seen_urls:
+            continue
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        if not host:
+            continue
+        if any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
+            continue
+        path = parsed.path.casefold()
+        is_document = path.endswith(_DOCUMENT_EXTENSIONS)
+        per_domain_limit = 10 if is_document else 2
+        if domain_counts[host] >= per_domain_limit:
+            continue
+        seen_urls.add(url)
+        domain_counts[host] += 1
+        unique.append(url)
+        if len(unique) >= max_urls:
+            break
+    return unique
 
 
 async def _discover(
@@ -328,28 +357,21 @@ async def _discover(
             diagnostics.append(detail)
             directory_records.extend(records)
 
-    google = GooglePlacesProvider(settings)
-    if not job.official_sources_only and google.configured:
-        requested_places = min(
-            settings.google_places_max_places,
-            max(2_000, job.max_results * 3),
-        )
+    directory_records = _dedupe_directory_records(directory_records)
+    diagnostics.append(f"Directory OSM: {len(directory_records)} attività uniche")
+
+    open_data = EuropeanOpenDataProvider(settings)
+    if open_data.configured:
         try:
-            records, detail = await google.search(
+            resources, detail = await open_data.search(
                 job.sector,
                 countries,
-                list(job.cities or []),
-                requested_max_places=requested_places,
+                list(job.keywords or []),
             )
+            urls.extend(resource.url for resource in resources)
             diagnostics.append(detail)
-            directory_records.extend(records)
         except Exception as exc:
-            diagnostics.append(f"Google Places={type(exc).__name__}: {exc}")
-    elif not job.official_sources_only:
-        diagnostics.append("Google Places: GOOGLE_PLACES_API_KEY non configurata")
-
-    directory_records = _dedupe_directory_records(directory_records)
-    diagnostics.append(f"Directory aggregate: {len(directory_records)} attività uniche")
+            diagnostics.append(f"Open data UE={type(exc).__name__}: {exc}")
 
     brave = BraveSearchProvider(settings)
     bing = BingRssSearchProvider(settings)
@@ -371,7 +393,7 @@ async def _discover(
         if host and host not in domain_hints:
             domain_hints[host] = record
     if resolved_records:
-        diagnostics.append(f"Siti ufficiali aggiunti da nomi di attività: {len(resolved_records)}")
+        diagnostics.append(f"Siti ufficiali aggiunti da nomi OSM: {len(resolved_records)}")
 
     queries = build_queries(job.sector, countries, list(job.cities or []), list(job.keywords or []))
     web_query_limit = min(
@@ -389,31 +411,14 @@ async def _discover(
         )
     )
 
-    unique: list[str] = []
-    seen_domains: set[str] = set()
-    max_domains = min(10_000, max(1_000, job.max_results * 3))
-    for url in urls:
-        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-        if not host or host in seen_domains:
-            continue
-        if any(host == blocked or host.endswith(f".{blocked}") for blocked in _DISCOVERY_BLOCKLIST):
-            continue
-        seen_domains.add(host)
-        unique.append(url)
-        if len(unique) >= max_domains:
-            break
-
-    unique = await _expand_with_common_crawl(unique, diagnostics)
-    diagnostics.append(f"Domini unici pronti per il crawler: {len(unique)}")
-    return unique, directory_records, domain_hints, diagnostics
+    max_urls = min(20_000, max(2_000, job.max_results * 4))
+    selected = _select_urls(urls, max_urls=max_urls)
+    selected = await _expand_with_common_crawl(selected, diagnostics)
+    diagnostics.append(f"URL e documenti pronti per il crawler: {len(selected)}")
+    return selected, directory_records, domain_hints, diagnostics
 
 
-def _directory_note(record: OsmContactRecord) -> str:
-    if record.source_type == "google_places":
-        return (
-            "Attività professionale pubblica scoperta tramite Google Places API. "
-            "Il sito ufficiale viene analizzato separatamente per cercare email pubblicate."
-        )
+def _directory_note(_: OsmContactRecord) -> str:
     return (
         "Contatto professionale pubblico scoperto tramite OpenStreetMap. "
         "Dati OSM © OpenStreetMap contributors."
@@ -438,9 +443,6 @@ def _save_directory_contacts(
         selected_phones = record.phones if "phone" in requested else []
         selected_address = record.address if "address" in requested else None
 
-        # A directory record with a website is first used as a discovery hint. It
-        # is saved as phone-only only after website crawling, so it cannot consume
-        # the result budget before email extraction starts.
         if defer_website_only and record.website and not selected_emails:
             continue
         if not selected_emails and not selected_phones:
@@ -491,6 +493,19 @@ def _save_directory_contacts(
     return db.get(SearchJob, job.id) or job
 
 
+def _source_type(url: str) -> tuple[str, str]:
+    path = urlparse(url).path.casefold()
+    if path.endswith(".pdf"):
+        return "public_pdf", "PDF pubblicamente accessibile"
+    if path.endswith((".csv", ".tsv")):
+        return "public_csv", "dataset CSV/TSV pubblicamente accessibile"
+    if path.endswith((".xlsx", ".xls")):
+        return "public_spreadsheet", "foglio elettronico pubblicamente accessibile"
+    if path.endswith((".json", ".xml")):
+        return "public_dataset", "dataset strutturato pubblicamente accessibile"
+    return "official_website", "pagina pubblicamente accessibile del sito"
+
+
 async def _run_job(job_id: str) -> None:
     settings = get_settings()
     db = SessionLocal()
@@ -530,9 +545,9 @@ async def _run_job(job_id: str) -> None:
                 return
             details = "; ".join(diagnostics[-10:]) or "nessun provider eseguito"
             raise RuntimeError(
-                "Nessun sito trovato dai motori disponibili. "
+                "Nessun sito o documento trovato dai provider disponibili. "
                 f"Diagnostica: {details}. "
-                "Configura GOOGLE_PLACES_API_KEY e BRAVE_SEARCH_API_KEY per la massima copertura."
+                "Configura BRAVE_SEARCH_API_KEY e aggiungi URL di albi/associazioni per ampliare la copertura."
             )
 
         country_hint = job.countries[0] if len(job.countries or []) == 1 else None
@@ -601,14 +616,10 @@ async def _run_job(job_id: str) -> None:
                 or (hint.organization if hint else None)
                 or candidate.domain.split(".")[0].replace("-", " ").title()
             )
-            source_is_pdf = candidate.source_url.casefold().split("?", 1)[0].endswith(".pdf")
-            source_type = "public_pdf" if source_is_pdf else "official_website"
+            source_type, source_label = _source_type(candidate.source_url)
             note = (
-                "Contatto estratto da un PDF pubblicamente accessibile. Verificare attualità e fonte "
+                f"Contatto estratto da {source_label}. Verificare attualità, finalità e base giuridica "
                 "prima dell'uso commerciale."
-                if source_is_pdf
-                else "Contatto estratto da una pagina pubblica del sito. Verificare finalità e base "
-                "giuridica prima dell'uso commerciale."
             )
 
             for email_group in _email_groups(

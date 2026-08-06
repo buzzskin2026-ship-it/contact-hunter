@@ -27,7 +27,6 @@ class EuropeanOpenDataProvider:
         ".csv",
         ".tsv",
         ".xlsx",
-        ".xls",
         ".json",
         ".xml",
         ".html",
@@ -81,7 +80,7 @@ class EuropeanOpenDataProvider:
         hint = (format_hint or "").casefold()
         if path.endswith(cls.allowed_extensions):
             return url
-        if any(token in hint for token in ("pdf", "csv", "excel", "xlsx", "xls", "json", "xml", "html")):
+        if any(token in hint for token in ("pdf", "csv", "tsv", "excel", "xlsx", "json", "xml", "html")):
             return url
         return None
 

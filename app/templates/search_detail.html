@@ -2,25 +2,38 @@
 {% block title %}{{ job.sector }} · Contact Hunter{% endblock %}
 {% block content %}
 <section class="page-heading" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}">
-  <div><span class="eyebrow">RICERCA {{ job.id[:8] }}</span><h1>{{ job.sector }}</h1><p>{{ (job.cities or job.countries)|join(', ') or 'Siti forniti manualmente' }}</p></div>
+  <div>
+    <span class="eyebrow">RICERCA {{ job.id[:8] }}</span>
+    <h1>{{ job.sector }}</h1>
+    <p>{{ (job.cities or job.countries)|join(', ') or 'Siti forniti manualmente' }}</p>
+  </div>
   <span id="job-status" class="status large {{ job.status }}">{{ job.status }}</span>
 </section>
 {% if not job.official_sources_only %}
-<div class="notice"><strong>Modalità segugio attiva:</strong> OpenStreetMap, open data europei, motori web, Common Crawl, sitemap, PDF, CSV, XLSX, JSON, XML e siti ufficiali. Le piste con solo telefono vengono elaborate dopo la ricerca delle email.</div>
+<div class="notice">
+  <strong>Campagna persistente {% if job.max_results == 0 %}senza tetto totale{% else %}fino a {{ job.max_results }} contatti{% endif %}:</strong>
+  OpenStreetMap, open data europei, motori web, Common Crawl, sitemap, PDF, CSV, XLSX, JSON, XML e siti ufficiali. Ogni pista viene salvata nella coda PostgreSQL e ripresa dopo eventuali riavvii.
+</div>
 {% endif %}
 <section class="metrics compact">
-  <article><span>URL da analizzare</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
+  <article><span>Piste totali</span><strong id="discovered-urls">{{ job.discovered_urls }}</strong></article>
   <article><span>Pagine e documenti</span><strong id="crawled-pages">{{ job.crawled_pages }}</strong></article>
   <article><span>Contatti trovati</span><strong id="contacts-found">{{ job.contacts_found }}</strong></article>
   <article><span>Duplicati</span><strong id="duplicates-skipped">{{ job.duplicates_skipped }}</strong></article>
+</section>
+<section class="metrics compact">
+  <article><span>In coda</span><strong>{{ queue_stats.get('queued', 0) }}</strong></article>
+  <article><span>In lavorazione</span><strong>{{ queue_stats.get('running', 0) }}</strong></article>
+  <article><span>Completate</span><strong>{{ queue_stats.get('completed', 0) }}</strong></article>
+  <article><span>Fallite dopo retry</span><strong>{{ queue_stats.get('failed', 0) }}</strong></article>
 </section>
 {% if job.error_message %}<div class="alert error">{{ job.error_message }}</div>{% endif %}
 <div class="toolbar">
   {% if job.status in ['failed', 'completed'] %}
   <form action="/searches/{{ job.id }}/retry" method="post"><button class="button secondary" type="submit">Ripeti stessa modalità</button></form>
   {% endif %}
-  {% if job.status in ['failed', 'completed'] and job.official_sources_only %}
-  <form action="/searches/{{ job.id }}/broad-retry" method="post"><button class="button primary" type="submit">Censimento segugio · fino a 50.000</button></form>
+  {% if job.status in ['failed', 'completed'] and (job.official_sources_only or job.max_results != 0) %}
+  <form action="/searches/{{ job.id }}/broad-retry" method="post"><button class="button primary" type="submit">Rilancia senza tetto totale</button></form>
   {% endif %}
   <a class="button secondary" href="/exports/xlsx?job_id={{ job.id }}">Esporta Excel</a>
   <a class="button ghost" href="/exports/csv?job_id={{ job.id }}">Esporta CSV</a>

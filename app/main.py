@@ -12,13 +12,11 @@ from app.api.routes import router
 from app.config import get_settings
 from app.db import init_db
 from app.security import require_admin
-from app.services import jobs as jobs_service
-from app.services.fast_crawler import FastContactCrawler
 from app.services.job_recovery import resume_pending_jobs
 
-APP_RELEASE = "2026.08.06-quick-crawl-v7"
-VALIDATION = "lint-tests-docker-passed"
-VALIDATION_RUN = "31084164413"
+APP_RELEASE = "2026.08.06-unbounded-campaign-v8"
+VALIDATION = "pending-ci"
+VALIDATION_RUN = "pending"
 
 
 @asynccontextmanager
@@ -26,7 +24,6 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.ensure_directories()
     init_db()
-    jobs_service.ContactCrawler = FastContactCrawler
     resume_pending_jobs()
     yield
 
@@ -34,7 +31,7 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
@@ -56,11 +53,22 @@ def deployed_version() -> dict[str, str]:
     }
 
 
-@app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(require_admin)])
+@app.get(
+    "/openapi.json",
+    include_in_schema=False,
+    dependencies=[Depends(require_admin)],
+)
 def protected_openapi():
     return JSONResponse(app.openapi())
 
 
-@app.get("/docs", include_in_schema=False, dependencies=[Depends(require_admin)])
+@app.get(
+    "/docs",
+    include_in_schema=False,
+    dependencies=[Depends(require_admin)],
+)
 def protected_docs():
-    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{settings.app_name} API")
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title=f"{settings.app_name} API",
+    )
